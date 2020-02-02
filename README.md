@@ -18,7 +18,7 @@ Pipeline configuration is specified in `conf/`
 
 ## References
 
-[1] - *Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, and David Bamman.
+[1] *Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, and David Bamman.
 "Learning to Groove with Inverse Sequence Transformations."
   International Conference on Machine Learning (ICML), 2019.*
 
