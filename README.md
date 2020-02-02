@@ -6,9 +6,9 @@ Transformer NN architecture experimentation on the Magenta Groove Midi dataset f
 
 This project relies on the Groove Midi Dataset, download and extract to the `data/` folder - https://magenta.tensorflow.org/datasets/groove#dataset
 
-Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, and David Bamman.
+*Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, and David Bamman.
 "Learning to Groove with Inverse Sequence Transformations."
-  International Conference on Machine Learning (ICML), 2019.
+  International Conference on Machine Learning (ICML), 2019.*
 
 ## Installation
 
