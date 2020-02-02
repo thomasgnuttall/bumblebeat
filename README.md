@@ -8,13 +8,28 @@ This project relies on the [Groove Midi Dataset](https://magenta.tensorflow.org/
 
 ## Installation
 
-To pip install Bumblebeat and all dependencies...
+To install Bumblebeat and all dependencies...
 
 `pip install -e .`
 
 ## Usage
 
 Pipeline configuration is specified in `conf/`
+
+### CLI commands
+
+To train...
+
+`bash here`
+
+To generate...
+
+`bash here`
+
+To evaluate...
+
+`bash here`
+
 
 ## References
 
