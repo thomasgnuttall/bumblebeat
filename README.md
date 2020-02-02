@@ -2,21 +2,23 @@
 
 Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation
 
-## Dataset
+## 1. Dataset
 
 This project relies on the [Groove Midi Dataset](https://magenta.tensorflow.org/datasets/groove#dataset), downloaded and extracted to the `data/` folder [1]
 
-## Installation
+## 2. Installation
 
 To install Bumblebeat and all dependencies...
 
 `pip install -e .`
 
-## Usage
+## 3. Usage
 
-Pipeline configuration is specified in `conf/`
+Be sure to follow dataset and installation instructions before attempting to run. (**1. Dataset** & **2. Installation**)
 
-### CLI commands
+All pipeline configuration is specified in `conf/`
+
+### 3.1 CLI commands
 
 To train...
 
@@ -31,7 +33,7 @@ To evaluate...
 `bash here`
 
 
-## References
+## 4. References
 
 [1] *Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, and David Bamman.
 "Learning to Groove with Inverse Sequence Transformations."
