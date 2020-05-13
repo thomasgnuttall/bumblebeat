@@ -46,11 +46,55 @@ conf = {
     'tgt_len': 512, # number of steps to predict
     'num_core_per_host': 8, 
     'quantize': True, # After this line for groove converter
-    'steps_per_quarter'  :4,
+    'steps_per_quarter': 4,
     'filter_4_4': None, # maybe we dont want this?,
     'max_tensors_per_notesequence': 20
 }
 
+# Default list of 9 drum types, where each type is represented by a list of
+# MIDI pitches for drum sounds belonging to that type. This default list
+# attempts to map all GM1 and GM2 drums onto a much smaller standard drum kit
+# based on drum sound and function.
+DEFAULT_DRUM_TYPE_PITCHES = [
+    # kick drum
+    [36, 35],
+
+    # snare drum
+    [38, 27, 28, 31, 32, 33, 34, 37, 39, 40, 56, 65, 66, 75, 85],
+
+    # closed hi-hat
+    [42, 44, 54, 68, 69, 70, 71, 73, 78, 80, 22],
+
+    # open hi-hat
+    [46, 67, 72, 74, 79, 81, 26],
+
+    # low tom
+    [45, 29, 41, 43, 61, 64, 84],
+
+    # mid tom
+    [48, 47, 60, 63, 77, 86, 87],
+
+    # high tom
+    [50, 30, 62, 76, 83],
+
+    # crash cymbal
+    [49, 52, 55, 57, 58],
+
+    # ride cymbal
+    [51, 53, 59, 82]
+]
+
+# Any length silence of length shorter
+# than 100,000 timesteps can be represented
+# efficiently
+# length of silence: token
+time_steps_vocab = [
+        1: 0,       
+        10: 1,      
+        100: 2,
+        1000: 3,
+        10000: 4
+    ]
 ### Data Representation ####
 ############################
 
@@ -153,16 +197,6 @@ ex_timestep = ex_tensor[2]
 # -> length = 9 x 3 = 27 ([9 instrument, 9 velocity, 9 offset])
 
 
-
-n_instruments = 9
-n_velocity_buckets = 10
-
-min_vel = 0
-max_vel = 1
-vel_buckets = split_range(min_vel, max_vel, n_velocity_buckets)
-
-token_dict, token_dict_reverse = create_vocab(n_instruments, n_velocity_buckets)
-
 encode_timestep(ex_timestep, token_dict, vel_buckets)
 
 def split_range(r1, r2, n):
@@ -192,29 +226,34 @@ def get_bucket_number(value, srange):
 
 import itertools
 
-def create_vocab(n_instruments, n_velocity_buckets, first_index=0):
+
+def create_vocab(n_instruments, n_velocity_buckets, first_index=5):
     """
-    Create vocabulary of all possible instrument-velocity combinations
-    <first_index> dictates which index to start on.
-        Each instrument is represented by <n_velocity_buckets> integers
-        Tokens increase across the dimension of instruments first:
-            token <first_index>     is instrument 0, velocity bucket 0
-            token <first_index> + 1 is instrument 0, velocity bucket 1
-            token <first_index> + 2 is instrument 0, velocity bucket 2
-            token <first_index> + N is instrument 0, velocity bucket 3
-                - where i = <n_instruments> - 1 (because of 0 indexing)
-                - where j = <n_velocity_buckets> - 1 (because of 0 indexing)
-                - where N = ixj - 1
+    Create vocabulary of all possible instrument-velocity combinations.
+
+    <first_index> dictates which index to start on, default 5 to allow for
+    5 timestep tokens.
+
+    Each instrument is represented by <n_velocity_buckets> integers
+    Tokens increase across the dimension of instruments first:
+        token <first_index>     is instrument 0, velocity bucket 0
+        token <first_index> + 1 is instrument 0, velocity bucket 1
+        token <first_index> + 2 is instrument 0, velocity bucket 2
+        token <first_index> + N is instrument 0, velocity bucket 3
+            - where i = <n_instruments> - 1 (because of 0 indexing)
+            - where j = <n_velocity_buckets> - 1 (because of 0 indexing)
+            - where N = ixj - 1
 
     returns: 2 x dict
         {instrument_index: {velocity_index:token}}
             ...for all instruments, velocities and tokens
         {index: (instrument index, velocity index)},
     """
+    
     # itertools.product returns sorted how we desire    
     all_comb = itertools.product(range(n_instruments), range(n_velocity_buckets))
     d_reverse = {i+first_index:(x,y) for i,(x,y) in enumerate(all_comb)}
-
+    
     d = {i:{} for i in range(n_instruments)}
     for t, (i,v) in  d_reverse.items():
         d[i][v] = t
@@ -261,12 +300,6 @@ def encode_timestep(arr, token_dict, vel_range, n_instruments=None):
     tokens = [token_dict[i][v] for i,v in hits_vel]
 
     return np.array(tokens)
-
-
-
-
-
-
 
 
 
@@ -373,9 +406,32 @@ class Corpus:
     """
     Corpus to handle data in pipeline
     """
-    def __init__(self, data_dir, dataset_name):
+    def __init__(
+            self, 
+            data_dir, 
+            dataset_name, 
+            pitch_classes=DEFAULT_DRUM_TYPE_PITCHES,  
+            time_steps_vocab=time_steps_vocab,
+            n_velocity_buckets=10,
+            min_velocity=0,
+            max_velocity=127
+        ):
         self.data_dir = data_dir
         self.dataset_name = dataset_name
+        self.pitch_classes = pitch_classes
+        self.time_steps_vocab = time_steps_vocab
+        self.n_velocity_buckets = n_velocity_buckets
+
+        self.velocity_buckets = split_range(
+            min_velocity, max_velocity, n_velocity_buckets)
+        self.pitch_class_map = self._classes_to_map(self.pitch_classes)
+        self.n_instruments = len(set(self.pitch_class_map.values()))
+
+        print(f'Generating vocab of {self.n_instruments} instruments and {n_velocity_buckets} velocity buckets')
+        self.vocab, self.reverse_vocab = create_vocab(
+                        self.n_instruments, n_velocity_buckets, 
+                        first_index=len(time_steps_vocab)
+                    ) # leave initial indices for time steps vocab
 
         #self.train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
         #self.test_data = self.download_midi(dataset_name, tfds.Split.TEST)
@@ -419,16 +475,25 @@ class Corpus:
             and s.notes[-1].quantized_end_step > mm.steps_per_bar_in_quantized_sequence(s)
         ]
 
-        # Create triple representation
-        # Loads of ARGS to pass here
-        grooveConverter = vae_data.GrooveConverter(
-            max_tensors_per_notesequence=max_tensors_per_notesequence)
-        
-        self.pitch_class_map = grooveConverter.pitch_class_map
-        self.vocab = set(self.pitch_class_map.values())
+        # note sequence -> [(pitch, vel_bucket, start timestep)]
+        triples = [self._note_sequence_to_triple(d) for d in dev_sequences]
 
-        return [grooveConverter._to_tensors(s) for s in dev_sequences]
-    
+        # Remove (,start timestep) and fill list with silence vocab
+        pitch_vel_timestep = [fill_timestep_silence(t, self.time_steps_vocab) \
+                              for t in triples]
+        return triples
+
+        ## Create triple representation
+        ## Loads of ARGS to pass here
+        #grooveConverter = vae_data.GrooveConverter(
+        #    max_tensors_per_notesequence=max_tensors_per_notesequence)
+        #
+        #self.pitch_class_map = grooveConverter.pitch_class_map
+        #self.vocab = set(self.pitch_class_map.values())
+        #self.dev_sequences = dev_sequences
+
+        #return [grooveConverter._to_tensors(s) for s in dev_sequences]
+
     def convert_to_tf_records(self, split, save_dir, bsz, tgt_len,
                         num_core_per_host, conf):
         """
@@ -468,6 +533,35 @@ class Corpus:
         """
         ts = s.time_signatures[0]
         return (ts.numerator == 4 and ts.denominator == 4)
+
+    def _note_sequence_to_triple(self, note_sequence):
+        """
+        from magenta <note_sequence> return list of
+        (pitch, velocity, quantized_start_step) 
+            we dont care about quantized_end_step 
+            since we are dealing with drums
+
+        - pitch is mapped using self.pitch_class_map
+        - velocities are bucketted as per self.velocity_buckets
+        """
+        d = [(self.pitch_class_map[n.pitch], \
+              get_bucket_number(n.velocity, self.velocity_buckets),
+              n.quantized_start_step) \
+                for n in note_sequence.notes \
+                if n.pitch in self.pitch_class_map]
+        return d
+
+    def _classes_to_map(self, classes):
+        class_map = {}
+        for cls, pitches in enumerate(classes):
+            for pitch in pitches:
+                class_map[pitch] = cls
+        return class_map
+
+
+
+
+
 
 
 def create_ordered_tfrecords(save_dir, basename, data, batch_size, tgt_len,
