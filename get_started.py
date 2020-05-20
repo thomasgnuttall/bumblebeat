@@ -350,6 +350,7 @@ def main(unused_argv):
     create_dir_if_not_exists(save_dir)
 
     # test mode
+    # Here we want our data as a single sequence
     if per_host_test_bsz > 0:
         corpus.convert_to_tfrecords(
           "valid", save_dir, per_host_test_bsz, tgt_len, num_core_per_host, conf
@@ -387,17 +388,16 @@ def get_corpus(dataset_name, data_dir):
         print("Producing dataset...")
         corpus = Corpus(data_dir, dataset_name)
     
-       #print("Saving dataset...")
-       #with open(fn, "wb") as fp:
-       #    pickle.dump(corpus, fp, protocol=2)
+        print("Saving dataset...")
+        with open(fn, "wb") as fp:
+            pickle.dump(corpus, fp, protocol=2)
 
-       #corpus_info = {
-       #  "vocab_size" : len(corpus.vocab),
-#      #   "cutoffs" : corpus.cutoffs,
-       #  "dataset" : corpus.dataset_name
-       #}
-       #with open(os.path.join(data_dir, dataset_name, "corpus-info.json"), "w") as fp:
-       #    json.dump(corpus_info, fp)
+        corpus_info = {
+          "vocab_size" : len(corpus.vocab),
+          "dataset" : corpus.dataset_name
+        }
+        with open(os.path.join(data_dir, dataset_name, "corpus-info.json"), "w") as fp:
+            json.dump(corpus_info, fp)
 
     return corpus
 
@@ -432,6 +432,8 @@ class Corpus:
                         self.n_instruments, n_velocity_buckets, 
                         first_index=len(time_steps_vocab)
                     ) # leave initial indices for time steps vocab
+
+        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab)
 
         #self.train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
         #self.test_data = self.download_midi(dataset_name, tfds.Split.TEST)
@@ -540,8 +542,11 @@ class Corpus:
         """
         From list of <triples> in the form:
             [(pitch class, bucketed velocity, start time (seconds)),...]
-        Return list of tokens matching pitch-velocity combinationts to tokens in <pitch_vocab>
+        Return list of tokens matching pitch-velocity combination to tokens in <pitch_vocab>
         and filling silence with time tokens in <time_steps_vocab>
+
+        Returns: list
+            sequence of tokens from the pitch and time_steps vocabularies
         """
 
         # Initalise final tokenised sequence
