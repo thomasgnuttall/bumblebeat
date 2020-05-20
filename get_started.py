@@ -88,13 +88,13 @@ DEFAULT_DRUM_TYPE_PITCHES = [
 # than 100,000 timesteps can be represented
 # efficiently
 # length of silence: token
-time_steps_vocab = [
+time_steps_vocab = {
         1: 0,       
         10: 1,      
         100: 2,
         1000: 3,
-        10000: 4
-    ]
+        10000: 4,
+    }
 ### Data Representation ####
 ############################
 
@@ -458,7 +458,7 @@ class Corpus:
         print('Processing dataset...')
         # Abstract to ARGS at some point
         quantize = conf['quantize']
-        steps_per_quarter  = conf['steps_per_quarter']
+        steps_per_quarter = conf['steps_per_quarter']
         filter_4_4 = conf['filter_4_4'] # maybe we dont want this?
         max_tensors_per_notesequence = conf['max_tensors_per_notesequence']
 
@@ -476,11 +476,8 @@ class Corpus:
         ]
 
         # note sequence -> [(pitch, vel_bucket, start timestep)]
-        triples = [self._note_sequence_to_triple(d) for d in dev_sequences]
+        triples = [self._note_sequence_to_triple(d, quantize=quantize) for d in dev_sequences]
 
-        # Remove (,start timestep) and fill list with silence vocab
-        pitch_vel_timestep = [fill_timestep_silence(t, self.time_steps_vocab) \
-                              for t in triples]
         return triples
 
         ## Create triple representation
@@ -493,6 +490,150 @@ class Corpus:
         #self.dev_sequences = dev_sequences
 
         #return [grooveConverter._to_tensors(s) for s in dev_sequences]
+
+    def _quantize(self, s, steps_per_quarter=4):
+        """
+        Quantize a magenta Note Sequence object
+        """
+        return mm.sequences_lib.quantize_note_sequence(s, steps_per_quarter)
+
+    def _is_4_4(self, s):
+        """
+        Return True if sample, <s> is in 4/4 timing, False otherwise
+        """
+        ts = s.time_signatures[0]
+        return (ts.numerator == 4 and ts.denominator == 4)
+
+    def _note_sequence_to_triple(self, note_sequence, quantize):
+        """
+        from magenta <note_sequence> return list of
+        (pitch, velocity, time*) 
+            we dont care about quantized_end_step/end_time 
+            since we are dealing with drums
+
+        *-if <quantized> use quantized_start_step else use start_time
+        - pitch is mapped using self.pitch_class_map
+        - velocities are bucketted as per self.velocity_buckets
+        """
+        d = [(self.pitch_class_map[n.pitch], \
+              get_bucket_number(n.velocity, self.velocity_buckets),
+              n.quantized_start_step if quantize else s.start_time) \
+                for n in note_sequence.notes \
+                if n.pitch in self.pitch_class_map]
+        
+        # Remove and fill list with silence vocab
+        if quantize:
+            #total_steps = note_sequence.total_quantized_steps
+            #timestep_lim = self._roundup(total_steps, 4)
+            #
+            #filled = fill_timestep_silence(d, timestep_lim, self.time_steps_vocab)
+        #else:
+            ticks_per_quarter = note_sequence.ticks_per_quarter
+            qpm = ex_dev_sequence.tempos[0].qpm # quarters per minute
+            ticks_per_second = qpm*ticks_per_quarter/60
+
+            filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
+
+        return filled
+
+    def _tokenize_w_ticks(self, triples, ticks_per_second, pitch_vocab, time_steps_vocab):
+        """
+        From list of <triples> in the form:
+            [(pitch class, bucketed velocity, start time (seconds)),...]
+        Return list of tokens matching pitch-velocity combinationts to tokens in <pitch_vocab>
+        and filling silence with time tokens in <time_steps_vocab>
+        """
+
+        # Initalise final tokenised sequence
+        w_silence = []
+
+        # Initalise counter to keep track of consecutive pitches
+        # so that we can ensure they are appended to our
+        # final tokenised sequence in numerical order
+        consecutive_pitches = 0
+
+        # index, (pitch, velocity, start time)
+        for i, (x, y, z) in enumerate(triples):
+            if i == 0:
+                silence = z
+            else:
+                silence = z - triples[i-1][2] # z of previous element
+            ticks = int(silence*ticks_per_second)
+            if ticks:
+                # make sure that any consecutive pitches in sequence
+                # are in numerical order so as to enforce an ordering
+                # rule for pitches that are commonly hit in unison
+                w_silence[-consecutive_pitches:] = sorted(w_silence[-consecutive_pitches:])
+
+                # every iteration in this loop is a pitch class
+                # (silences are computed using time since last pitch class)
+                # hence we set consecutive pitch back to one 
+                # (this is added just outside of this if-clause)
+                consecutive_pitches = 1
+
+                # Number of ticks to list of time tokens
+                time_tokens = self._convert_num_to_denominations(ticks, time_steps_vocab)
+
+                # Add time tokens to final sequence before we add our pitch class
+                w_silence += time_tokens
+            else:
+                # Remember that every iteration is a pitch.
+                # If <ticks> is 0 then this pitch occurs
+                # simultaneously with the previous.
+                # We sort these numerically before adding the
+                # next stream of time tokens
+                consecutive_pitches += 1
+
+            # Triple to tokens...
+            #   Discard time since we have handled that with time tokens.
+            #   Look up pitch velocity combination for corresponding token.
+            pitch_tok = pitch_vocab[x][y] # [pitch class][velocity]
+            w_silence.append(pitch_tok)
+
+        return w_silence
+
+    def _convert_num_to_denominations(self, num, time_vocab):
+        """
+        Convert <num> into sequence of time tokens in (<time_vocab>).
+        Tokens are selected so as to return a sequence of minimum length possible
+
+        Params
+        ======
+        num: int
+            Number of ticks to convert
+        time_vocab: dict
+            {num_ticks: token}
+
+        Return
+        ======
+        list:
+            [tokens representing number]
+        """
+        # Start with largest demoninations
+        denominations = list(sorted(time_vocab.keys(), reverse=True)) 
+        seq = []
+        for d in denominations:
+            div = num/d
+            # If <num> can be divided by this number
+            # Create as many tokens as possible with this denomination
+            if div > 1:
+                floor = math.floor(div)
+                seq += floor*[time_vocab[d]]
+                num -= floor*d
+        return seq
+
+    def _roundup(self, x, n):
+        """
+        Roundup <x> to nearest multiple of <n>
+        """
+        return int(math.ceil(x/n)) * n
+
+    def _classes_to_map(self, classes):
+        class_map = {}
+        for cls, pitches in enumerate(classes):
+            for pitch in pitches:
+                class_map[pitch] = cls
+        return class_map
 
     def convert_to_tf_records(self, split, save_dir, bsz, tgt_len,
                         num_core_per_host, conf):
@@ -521,42 +662,6 @@ class Corpus:
             }
             json.dump(record_info, fp)
 
-    def _quantize(self, s, steps_per_quarter=4):
-        """
-        Quantize a magenta Note Sequence object
-        """
-        return mm.sequences_lib.quantize_note_sequence(s,steps_per_quarter)
-
-    def _is_4_4(self, s):
-        """
-        Return True if sample, <s> is in 4/4 timing, False otherwise
-        """
-        ts = s.time_signatures[0]
-        return (ts.numerator == 4 and ts.denominator == 4)
-
-    def _note_sequence_to_triple(self, note_sequence):
-        """
-        from magenta <note_sequence> return list of
-        (pitch, velocity, quantized_start_step) 
-            we dont care about quantized_end_step 
-            since we are dealing with drums
-
-        - pitch is mapped using self.pitch_class_map
-        - velocities are bucketted as per self.velocity_buckets
-        """
-        d = [(self.pitch_class_map[n.pitch], \
-              get_bucket_number(n.velocity, self.velocity_buckets),
-              n.quantized_start_step) \
-                for n in note_sequence.notes \
-                if n.pitch in self.pitch_class_map]
-        return d
-
-    def _classes_to_map(self, classes):
-        class_map = {}
-        for cls, pitches in enumerate(classes):
-            for pitch in pitches:
-                class_map[pitch] = cls
-        return class_map
 
 
 
