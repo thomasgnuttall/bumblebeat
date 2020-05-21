@@ -262,6 +262,7 @@ def create_vocab(n_instruments, n_velocity_buckets, first_index=5):
 ### transformer-xl/data_utils.py
 ################################
 import functools
+import json
 import math
 import os
 import pickle
@@ -617,6 +618,8 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
+def _int64_feature(values):
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=values))
 
 def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     
@@ -632,8 +635,6 @@ def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     for t in range(0, batched_data.shape[1] - 1, tgt_len):
       cur_tgt_len = min(batched_data.shape[1] - 1 - t, tgt_len)
       # drop the remainder if use tpu
-      if use_tpu and cur_tgt_len < tgt_len: 
-        break
       if num_batch % 500 == 0:
         print("  processing batch {}".format(num_batch))
       for idx in range(batch_size):
@@ -663,9 +664,9 @@ def batchify(data, batch_size):
     """
     # Create one long sequence of data with individual samples
     # divided by end of sequence token, -1
-    seq = np.array(functools.reduce(lambda x,y: x+[-1]+y, data))
+    seq = functools.reduce(lambda x,y: x+[-1]+y, data)
     eos = max(seq) + 1 #  add new token for end of sequence
-    seq = [x if x != -1 else eos for x in seq]
+    seq = np.array([x if x != -1 else eos for x in seq])
 
     num_step = len(seq) // batch_size
     seq = seq[:batch_size * num_step]
