@@ -405,6 +405,8 @@ class Corpus:
         #print('Processing dataset ALL...')
         #self.all = self.process_dataset(all_data)
 
+        # TODO: Augment Data
+
     def download_midi(self, dataset_name, dataset_split):
         print(f"Downloading midi data: {dataset_name}, split: {dataset_split}")
         dataset = tfds.as_numpy(
@@ -443,17 +445,30 @@ class Corpus:
         triples = [self._note_sequence_to_triple(d, quantize=quantize) for d in dev_sequences]
 
         return triples
+    
+    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size, conf):
+        """
+        Convert tensor data to TF records and store
+        """
+        # Our data is many small sequences,
+        # we batch on a sample level
+        data = getattr(self, split)
 
-        ## Create triple representation
-        ## Loads of ARGS to pass here
-        #grooveConverter = vae_data.GrooveConverter(
-        #    max_tensors_per_notesequence=max_tensors_per_notesequence)
-        #
-        #self.pitch_class_map = grooveConverter.pitch_class_map
-        #self.vocab = set(self.pitch_class_map.values())
-        #self.dev_sequences = dev_sequences
+        file_names = []
+        record_name = f"record_info-{split}.bsz-{batch_size}.tlen-{tgt_len}.json"
+        record_info_path = os.path.join(save_dir, record_name)
+        
+        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len, batch_size)
 
-        #return [grooveConverter._to_tensors(s) for s in dev_sequences]
+        file_names.append(file_name)
+
+        with open(record_info_path, "w") as fp:
+            record_info = {
+              "filenames": file_names,
+              "bin_sizes": [], # No bins here
+              "num_batch": num_batch
+            }
+            json.dump(record_info, fp)
 
     def _quantize(self, s, steps_per_quarter=4):
         """
@@ -602,30 +617,6 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
-    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size, conf):
-        """
-        Convert tensor data to TF records and store
-        """
-        # Our data is many small sequences,
-        # we batch on a sample level
-        data = getattr(self, split)
-
-        file_names = []
-        record_name = f"record_info-{split}.bsz-{batch_size}.tlen-{tgt_len}.json"
-        record_info_path = os.path.join(save_dir, record_name)
-        
-        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len, batch_size)
-
-        file_names.append(file_name)
-
-        with open(record_info_path, "w") as fp:
-            record_info = {
-              "filenames": file_names,
-              "bin_sizes": [], # No bins here
-              "num_batch": num_batch
-            }
-            json.dump(record_info, fp)
-
 
 def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     
@@ -683,26 +674,6 @@ def batchify(data, batch_size):
 
 ######################################################
 ######################################################
-
-
-# Preprocess [features]
-# =====================
-# (data is in correct format but will be embelished)
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-
 
 
 # Train model
