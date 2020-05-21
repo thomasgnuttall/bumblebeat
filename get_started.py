@@ -39,7 +39,7 @@
 ##################### Confifuration ########################
 # - to be abstracted to configuration files at some point
 conf = {
-    'dataset_name': "groove/2bar-midionly",
+    'dataset_name': "groove/full-midionly",
     'data_dir': 'data/',
     'per_host_test_bsz': 4,
     'batch_size': 24,
@@ -191,10 +191,9 @@ time_steps_vocab = {
 # With 10 offset buckets and 10 velocity buckets
 # 
 
-ex_tensor = tensors[0][0][0]
-
-ex_timestep = ex_tensor[2]
-# -> length = 9 x 3 = 27 ([9 instrument, 9 velocity, 9 offset])
+# BATCHING SEQUENCE DATA
+# - divide sequence into <batch_size> equal portions
+# - Multiply by number of passes
 
 
 encode_timestep(ex_timestep, token_dict, vel_buckets)
@@ -261,45 +260,7 @@ def create_vocab(n_instruments, n_velocity_buckets, first_index=5):
     return d, d_reverse
 
 
-def encode_timestep(arr, token_dict, vel_range, n_instruments=None):
-    """
-    For one time step return array of tokens describing timestep
 
-    Instruments are always returned in order of instrument index, velocity index
-
-    Param
-    =====
-    arr: np.array
-        array of timestep info, <n_instruments>*[hit event] + <n_intruments>*[velocity] + <n_instruments>*[offset] 
-    token_dict: dict
-        {instrument_index: {velocity_index:token}}
-            ...for all instruments, velocities and tokens
-        from create_vocab()
-    vel_range: list
-        list of velocity bucket boundaries 
-        from split_range()
-    n_instruments: int
-        number of instruments described in arr
-            if None, infer from token_dict
-    """
-    
-    n = n_instruments or len(token_dict)
-
-    indices = range(n)
-    instruments = arr[:n]
-    velocities = arr[n:n*2]
-    offsets = arr[n*2:]
-
-    # instrument, velocity for non 0 instruments
-    hits = [(x,z) for x,y,z in zip(indices, instruments, velocities) if y != 0 and z != 0]
-
-    # convert velocity to bucket
-    hits_vel = [(x, get_bucket_number(z, vel_range)) for x,z in hits]
-
-    # Get token corresponding to this instrument at this velocity
-    tokens = [token_dict[i][v] for i,v in hits_vel]
-
-    return np.array(tokens)
 
 
 
@@ -352,19 +313,19 @@ def main(unused_argv):
     # test mode
     # Here we want our data as a single sequence
     if per_host_test_bsz > 0:
-        corpus.convert_to_tfrecords(
-          "valid", save_dir, per_host_test_bsz, tgt_len, num_core_per_host, conf
+        corpus.convert_to_tf_records(
+          "valid", save_dir, tgt_len, conf
         )
         return
 
-    #for split, batch_size in zip(
-    #  ["train", "valid"],
-    #  [FLAGS.per_host_train_bsz, FLAGS.per_host_valid_bsz]):
+    for split, batch_size in zip(
+      ["train", "valid"],
+      [FLAGS.per_host_train_bsz, FLAGS.per_host_valid_bsz]):
 
-    #    if batch_size <= 0: continue
-    #    print("Converting {} set...".format(split))
-    #    corpus.convert_to_tfrecords(split, save_dir, batch_size, FLAGS.tgt_len,
-    #                                FLAGS.num_core_per_host, FLAGS=FLAGS)
+        if batch_size <= 0: continue
+        print("Converting {} set...".format(split))
+        corpus.convert_to_tf_records(split, save_dir, batch_size, FLAGS.tgt_len,
+                                    FLAGS.num_core_per_host, FLAGS=FLAGS)
 
 
 def get_corpus(dataset_name, data_dir):
@@ -378,7 +339,7 @@ def get_corpus(dataset_name, data_dir):
     """
     fn = os.path.join(data_dir, dataset_name, "cache.pkl")
 
-    if exists(fn):
+    if False:#exists(fn):
         print("Loading cached dataset...")
         with open(fn, "rb") as fp:
             corpus = pickle.load(fp)
@@ -435,12 +396,19 @@ class Corpus:
 
         self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab)
 
-        #self.train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
-        #self.test_data = self.download_midi(dataset_name, tfds.Split.TEST)
+        train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
+        test_data = self.download_midi(dataset_name, tfds.Split.TEST)
         valid_data = self.download_midi(dataset_name, tfds.Split.VALIDATION)
-        #self.all_data = self.download_midi(dataset_name, tfds.Split.ALL)
-
+        #all_data = self.download_midi(dataset_name, tfds.Split.ALL)
+        
+        print('Processing dataset TRAIN...')
+        self.train = self.process_dataset(train_data)
+        print('Processing dataset TEST...')
+        self.test = self.process_dataset(test_data)
+        print('Processing dataset VALID...')
         self.valid = self.process_dataset(valid_data)
+        #print('Processing dataset ALL...')
+        #self.all = self.process_dataset(all_data)
 
     def download_midi(self, dataset_name, dataset_split):
         print(f"Downloading midi data: {dataset_name}, split: {dataset_split}")
@@ -457,7 +425,6 @@ class Corpus:
         Create tensors of triple representation for each sample
         (hit, velocity, offset) for each midi instrument at each timestep
         """
-        print('Processing dataset...')
         # Abstract to ARGS at some point
         quantize = conf['quantize']
         steps_per_quarter = conf['steps_per_quarter']
@@ -570,10 +537,10 @@ class Corpus:
                 # rule for pitches that are commonly hit in unison
                 w_silence[-consecutive_pitches:] = sorted(w_silence[-consecutive_pitches:])
 
-                # every iteration in this loop is a pitch class
-                # (silences are computed using time since last pitch class)
-                # hence we set consecutive pitch back to one 
-                # (this is added just outside of this if-clause)
+                # Since silences are computed using time since last pitch class,
+                # every iteration in this loop is a pitch class.
+                # Hence we set consecutive pitch back to one 
+                # (representing the pitch of this iteration, added just outside of this if-clause)
                 consecutive_pitches = 1
 
                 # Number of ticks to list of time tokens
@@ -640,50 +607,41 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
-    def convert_to_tf_records(self, split, save_dir, bsz, tgt_len,
-                        num_core_per_host, conf):
+    def convert_to_tf_records(self, split, save_dir, tgt_len, conf):
         """
         Convert tensor data to TF records and store
         """
-        file_names = []
-        record_name = f"record_info-{split}.bsz-{bsz}.tlen-{tgt_len}.json"
-        record_info_path = os.path.join(save_dir, record_name)
-
+        # Our data is many small sequences,
+        # we batch on a sample level
         data = getattr(self, split)
+        num_batches = len(data)
+
+        file_names = []
+        record_name = f"record_info-{split}.bsz-{num_batches}.tlen-{tgt_len}.json"
+        record_info_path = os.path.join(save_dir, record_name)
         
-        file_name, num_batch = create_ordered_tfrecords(
-            save_dir, split, data, bsz, tgt_len, num_core_per_host,
-            [], [],
-            num_passes=FLAGS.num_passes if split == 'train' and use_tpu else 1,
-            use_tpu=use_tpu)
+        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len)
 
         file_names.append(file_name)
 
         with open(record_info_path, "w") as fp:
             record_info = {
               "filenames": file_names,
-              "bin_sizes": bin_sizes,
+              "bin_sizes": [], # No bins here
               "num_batch": num_batch
             }
             json.dump(record_info, fp)
 
 
-
-
-
-
-
-
-def create_ordered_tfrecords(save_dir, basename, data, batch_size, tgt_len,
-                               num_core_per_host, cutoffs=[], bin_sizes=[], 
-                               num_passes=1):
-
-    file_name = f"{basename}.bsz-{batch_size}.tlen-{tgt_len}.tfrecords"
+def create_ordered_tfrecords(save_dir, basename, data, tgt_len):
+    
+    num_batches = len(data)
+    file_name = f"{basename}.bsz-{num_batches}.tlen-{tgt_len}.tfrecords"
 
     save_path = os.path.join(save_dir, file_name)
     record_writer = tf.python_io.TFRecordWriter(save_path)
 
-    batched_data = batchify(data, batch_size, num_passes)
+    batched_data = batchify(data)
 
     num_batch = 0
     # for t in range(0, batched_data.shape[1] - tgt_len - 1, tgt_len):
@@ -694,7 +652,7 @@ def create_ordered_tfrecords(save_dir, basename, data, batch_size, tgt_len,
         break
       if num_batch % 500 == 0:
         print("  processing batch {}".format(num_batch))
-      for idx in range(batch_size):
+      for idx in range(num_batches):
         inputs = batched_data[idx, t:t + cur_tgt_len]
         labels = batched_data[idx, t + 1:t + cur_tgt_len + 1]
 
@@ -703,56 +661,6 @@ def create_ordered_tfrecords(save_dir, basename, data, batch_size, tgt_len,
             "inputs": _int64_feature(inputs),
             "labels": _int64_feature(labels),
         }
-
-        if len(cutoffs) > 0 and use_tpu:
-          # validate `bin_sizes` and `cutoffs`
-          assert len(cutoffs) - len(bin_sizes) == 2, \
-            "len(cutoffs) - len(bin_sizes) != 2"
-
-          # mask for bin 0
-          left, right = cutoffs[:2]
-          inp_mask = ((inputs >= left) * (inputs < right)).astype(np.float32)
-          tgt_mask = ((labels >= left) * (labels < right)).astype(np.float32)
-
-          feature["inp_mask"] = _float_feature(inp_mask)
-          feature["tgt_mask"] = _float_feature(tgt_mask)
-
-          # refresh `inp_cnts` and `tgt_cnts` for each TPU core
-          if idx % (batch_size // num_core_per_host) == 0:
-            inp_cnts = [0] * len(bin_sizes)
-            tgt_cnts = [0] * len(bin_sizes)
-
-          head_labels = np.copy(labels)
-          inp_pos_per_bin, tgt_pos_per_bin = [], []
-          for b, (left, right) in enumerate(zip(cutoffs[1:-1], cutoffs[2:])):
-            inp_pos = np.where((inputs >= left) * (inputs < right))[0]
-            tgt_pos = np.where((labels >= left) * (labels < right))[0]
-            inp_pos_per_bin.append(inp_pos)
-            tgt_pos_per_bin.append(tgt_pos)
-
-            head_labels[tgt_pos] = cutoffs[1] + b
-
-          feature["head_labels"] = _int64_feature(head_labels)
-
-          # permutation feature
-          def _add_perm_feature(feature, pos_per_bin, cnts, prefix):
-            for b, pos in enumerate(pos_per_bin):
-              idx_tuple = []
-              for p in pos:
-                if cnts[b] < bin_sizes[b]:
-                  idx_tuple.append([p, cnts[b]])
-                  cnts[b] += 1
-                else:
-                  break
-
-              n_tup = len(idx_tuple)
-              tup = np.array(idx_tuple).reshape(n_tup * 2)
-
-              feature["{}_cnt_{}".format(prefix, b)] = _int64_feature([n_tup])
-              feature["{}_tup_{}".format(prefix, b)] = _int64_feature(tup)
-
-          _add_perm_feature(feature, inp_pos_per_bin, inp_cnts, "inp")
-          _add_perm_feature(feature, tgt_pos_per_bin, tgt_cnts, "tgt")
 
         example = tf.train.Example(features=tf.train.Features(feature=feature))
         record_writer.write(example.SerializeToString())
@@ -765,61 +673,16 @@ def create_ordered_tfrecords(save_dir, basename, data, batch_size, tgt_len,
     return file_name, num_batch
 
 
-def batchify(data, batch_size, num_passes):
+def batchify(data):
   """
-    if use_tpu = True: num_passes > 1 
-    
-    Since TPU training requires entire [bsz x tgt_len] chunks, it can discard
-    as many as `bsz * tgt_len` tokens in training. When `bsz` and `tgt_len` are 
-    both large, as in the case of TPU training for Transformer-XL, the problem
-    may lead to detectable performance drop. 
-
-    Here, we use multiple randomly shifted copies to deal with this problem.
+  Each sample in <data> a batch. Pad out each with -1's to
+  the legnth of the longest
   """
-  if num_passes > 1:
-    data_len = len(data)
-    double_data = np.concatenate([data, data])
-    data_list = []
-    for i in range(num_passes):
-      start = np.random.randint(0, data_len)
-      data_list.append(double_data[start:start+data_len])
-    data = np.concatenate(data_list)
+  max_len = max([len(d) for d in data])
+  for i, d in enumerate(data):
+    data[i] = d + (max_len-len(d))*[-1]
+  return np.array(data)
 
-  num_step = len(data) // batch_size
-  data = data[:batch_size * num_step]
-  data = data.reshape(batch_size, num_step)
-
-  return data
-
-
-def get_bin_sizes(data, batch_size, tgt_len, cutoffs, std_mult=[2.5, 2.5, 2.5]):
-  """
-  Note: the `batch_size` here should be per-core batch size
-  """
-  bin_sizes = []
-
-  def _nearest_to_eight(x): # so that it's faster on TPUs
-    y = x - x % 8
-    return y + 8 if x % 8 >= 4 else max(8, y)
-
-  if cutoffs:
-    num_batch = len(data) // batch_size // tgt_len
-
-    data = data[:batch_size * num_batch * tgt_len]
-    data = data.reshape(batch_size, num_batch, tgt_len)
-
-    tot = batch_size * tgt_len
-    for b, (left, right) in enumerate(zip(cutoffs[1:-1], cutoffs[2:])):
-      mask = (data >= left) * (data < right)
-      percents = mask.astype(np.float64).sum(2).sum(0) / tot
-      mean = np.mean(percents)
-      std = np.std(percents)
-
-      bin_size = int(math.ceil(tgt_len * batch_size * (mean + std_mult[b] * std)))
-      bin_size = _nearest_to_eight(bin_size)
-      bin_sizes.append(bin_size)
-
-  return bin_sizes
 
 ######################################################
 ######################################################
