@@ -44,6 +44,7 @@ conf = {
     'per_host_test_bsz': 4,
     'batch_size': 24,
     'tgt_len': 512, # number of steps to predict
+    'batch_size': 6,
     'num_core_per_host': 8, 
     'quantize': True, # After this line for groove converter
     'steps_per_quarter': 4,
@@ -196,8 +197,6 @@ time_steps_vocab = {
 # - Multiply by number of passes
 
 
-encode_timestep(ex_timestep, token_dict, vel_buckets)
-
 def split_range(r1, r2, n):
     """
     Split range <r1> - <r2> into <n> equal size buckets
@@ -260,12 +259,9 @@ def create_vocab(n_instruments, n_velocity_buckets, first_index=5):
     return d, d_reverse
 
 
-
-
-
-
 ### transformer-xl/data_utils.py
 ################################
+import functools
 import math
 import os
 import pickle
@@ -301,21 +297,19 @@ def main(unused_argv):
 
     # ARGS for TF records
     per_host_test_bsz = conf['per_host_test_bsz']
-    batch_size = conf['batch_size']
     tgt_len = conf['tgt_len'] # number of steps to predict
-    num_core_per_host = conf['num_core_per_host']
+    batch_size = conf['batch_size']
 
     corpus = get_corpus(dataset_name, data_dir)
 
-    save_dir = os.path.join(data_dir, "tfrecords")
+    save_dir = os.path.join(data_dir, dataset_name, "tfrecords/")
     create_dir_if_not_exists(save_dir)
 
     # test mode
     # Here we want our data as a single sequence
     if per_host_test_bsz > 0:
         corpus.convert_to_tf_records(
-          "valid", save_dir, tgt_len, conf
-        )
+          "train", save_dir, tgt_len, batch_size, conf)
         return
 
     for split, batch_size in zip(
@@ -339,7 +333,7 @@ def get_corpus(dataset_name, data_dir):
     """
     fn = os.path.join(data_dir, dataset_name, "cache.pkl")
 
-    if False:#exists(fn):
+    if exists(fn):
         print("Loading cached dataset...")
         with open(fn, "rb") as fp:
             corpus = pickle.load(fp)
@@ -354,8 +348,9 @@ def get_corpus(dataset_name, data_dir):
             pickle.dump(corpus, fp, protocol=2)
 
         corpus_info = {
-          "vocab_size" : len(corpus.vocab),
-          "dataset" : corpus.dataset_name
+          "vocab_size" : len(corpus.reverse_vocab)+len(corpus.time_steps_vocab),
+          "dataset" : corpus.dataset_name,
+          'cutoffs': []
         }
         with open(os.path.join(data_dir, dataset_name, "corpus-info.json"), "w") as fp:
             json.dump(corpus_info, fp)
@@ -607,20 +602,19 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
-    def convert_to_tf_records(self, split, save_dir, tgt_len, conf):
+    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size, conf):
         """
         Convert tensor data to TF records and store
         """
         # Our data is many small sequences,
         # we batch on a sample level
         data = getattr(self, split)
-        num_batches = len(data)
 
         file_names = []
-        record_name = f"record_info-{split}.bsz-{num_batches}.tlen-{tgt_len}.json"
+        record_name = f"record_info-{split}.bsz-{batch_size}.tlen-{tgt_len}.json"
         record_info_path = os.path.join(save_dir, record_name)
         
-        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len)
+        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len, batch_size)
 
         file_names.append(file_name)
 
@@ -633,15 +627,14 @@ class Corpus:
             json.dump(record_info, fp)
 
 
-def create_ordered_tfrecords(save_dir, basename, data, tgt_len):
+def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     
-    num_batches = len(data)
-    file_name = f"{basename}.bsz-{num_batches}.tlen-{tgt_len}.tfrecords"
+    file_name = f"{basename}.bsz-{batch_size}.tlen-{tgt_len}.tfrecords"
 
     save_path = os.path.join(save_dir, file_name)
     record_writer = tf.python_io.TFRecordWriter(save_path)
 
-    batched_data = batchify(data)
+    batched_data = batchify(data, batch_size)
 
     num_batch = 0
     # for t in range(0, batched_data.shape[1] - tgt_len - 1, tgt_len):
@@ -652,7 +645,7 @@ def create_ordered_tfrecords(save_dir, basename, data, tgt_len):
         break
       if num_batch % 500 == 0:
         print("  processing batch {}".format(num_batch))
-      for idx in range(num_batches):
+      for idx in range(batch_size):
         inputs = batched_data[idx, t:t + cur_tgt_len]
         labels = batched_data[idx, t + 1:t + cur_tgt_len + 1]
 
@@ -673,15 +666,19 @@ def create_ordered_tfrecords(save_dir, basename, data, tgt_len):
     return file_name, num_batch
 
 
-def batchify(data):
-  """
-  Each sample in <data> a batch. Pad out each with -1's to
-  the legnth of the longest
-  """
-  max_len = max([len(d) for d in data])
-  for i, d in enumerate(data):
-    data[i] = d + (max_len-len(d))*[-1]
-  return np.array(data)
+def batchify(data, batch_size):
+    """
+    Create training batches
+    """
+    # Create one long sequence of data with individual samples
+    # divided by end of sequence token, -1
+    seq = np.array(functools.reduce(lambda x,y: x+[-1]+y, data))
+
+    num_step = len(seq) // batch_size
+    seq = seq[:batch_size * num_step]
+    seq = seq.reshape(batch_size, num_step)
+
+    return seq
 
 
 ######################################################
