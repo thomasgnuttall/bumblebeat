@@ -349,7 +349,7 @@ def get_corpus(dataset_name, data_dir):
             pickle.dump(corpus, fp, protocol=2)
 
         corpus_info = {
-          "vocab_size" : len(corpus.reverse_vocab)+len(corpus.time_steps_vocab),
+          "vocab_size" : corpus.vocab_size,
           "dataset" : corpus.dataset_name,
           'cutoffs': []
         }
@@ -390,7 +390,7 @@ class Corpus:
                         first_index=len(time_steps_vocab)
                     ) # leave initial indices for time steps vocab
 
-        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add one for <eos> token
+        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add 1 for <eos> token
 
         train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
         test_data = self.download_midi(dataset_name, tfds.Split.TEST)
@@ -618,8 +618,10 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
+
 def _int64_feature(values):
   return tf.train.Feature(int64_list=tf.train.Int64List(value=values))
+
 
 def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     
