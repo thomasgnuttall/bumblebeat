@@ -389,7 +389,7 @@ class Corpus:
                         first_index=len(time_steps_vocab)
                     ) # leave initial indices for time steps vocab
 
-        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab)
+        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add one for <eos> token
 
         train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
         test_data = self.download_midi(dataset_name, tfds.Split.TEST)
@@ -508,7 +508,7 @@ class Corpus:
             #filled = fill_timestep_silence(d, timestep_lim, self.time_steps_vocab)
         #else:
             ticks_per_quarter = note_sequence.ticks_per_quarter
-            qpm = ex_dev_sequence.tempos[0].qpm # quarters per minute
+            qpm = note_sequence.tempos[0].qpm # quarters per minute
             ticks_per_second = qpm*ticks_per_quarter/60
 
             filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
@@ -664,6 +664,8 @@ def batchify(data, batch_size):
     # Create one long sequence of data with individual samples
     # divided by end of sequence token, -1
     seq = np.array(functools.reduce(lambda x,y: x+[-1]+y, data))
+    eos = max(seq) + 1 #  add new token for end of sequence
+    seq = [x if x != -1 else eos for x in seq]
 
     num_step = len(seq) // batch_size
     seq = seq[:batch_size * num_step]
