@@ -2,5 +2,5 @@ Click==7.0
 numpy==1.18.1
 tensorflow==2.1.0
 tensorflow_datasets==2.0.0
-PyYAML==3.13
+PyYAML==5.1
 
