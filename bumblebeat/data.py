@@ -125,6 +125,12 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processi
     return corpus
 
 
+def get_corpus_info(corpus_info_path):
+  with open(corpus_info_path, "r") as fp:
+    corpus_info = json.load(fp)
+  return corpus_info
+
+
 class Corpus:
     """
     Corpus to handle data in pipeline
@@ -469,4 +475,151 @@ def batchify(data, batch_size):
     seq = seq.reshape(batch_size, num_step)
 
     return seq
+
+
+def get_input_fn(record_info_dir, split, per_host_bsz, tgt_len,
+                 num_core_per_host, num_hosts=1, use_tpu=False):
+  """Creates input function."""
+  record_info = load_record_info(record_info_dir, split, per_host_bsz, tgt_len,
+                                 num_core_per_host, use_tpu=use_tpu)
+
+  file_names = record_info["filenames"]
+  bin_sizes = record_info["bin_sizes"]
+  num_batch = record_info["num_batch"]
+
+  tf.logging.info("[{}] File names {}".format(split, file_names))
+
+  def input_fn(params):
+    # per-core batch size
+    per_core_bsz = params["batch_size"]
+
+    # data_dir could be a remote path, e.g., a google storage url
+    data_dir = params["data_dir"]
+
+    def parser(record):
+      # preprocess "inp_perm" and "tgt_perm"
+      def _process_perm_feature(example, prefix):
+        for b in range(len(bin_sizes)):
+          cnt = example.pop("{}_cnt_{}".format(prefix, b))[0]
+          tup = example.pop("{}_tup_{}".format(prefix, b))
+
+          tup = tf.reshape(
+              tf.sparse_tensor_to_dense(tup),
+              shape=[cnt, 2])
+
+          # tf.float32
+          perm = tf.sparse_to_dense(
+              sparse_indices=tup,
+              output_shape=[tgt_len, bin_sizes[b]],
+              sparse_values=1.0,
+              default_value=0.0)
+
+          example["{}_perm_{}".format(prefix, b)] = perm
+
+      # whether allow the last batch with a potentially shorter length
+      if use_tpu:
+        record_spec = {
+            "inputs": tf.FixedLenFeature([tgt_len], tf.int64),
+            "labels": tf.FixedLenFeature([tgt_len], tf.int64),
+        }
+      else:
+        record_spec = {
+            "inputs": tf.VarLenFeature(tf.int64),
+            "labels": tf.VarLenFeature(tf.int64),
+        }
+
+      # permutation related features
+      if bin_sizes and use_tpu:
+        # tf.float32
+        record_spec["inp_mask"] = tf.FixedLenFeature([tgt_len], tf.float32)
+        record_spec["tgt_mask"] = tf.FixedLenFeature([tgt_len], tf.float32)
+
+        record_spec["head_labels"] = tf.FixedLenFeature([tgt_len], tf.int64)
+
+        for b in range(len(bin_sizes)):
+          record_spec["inp_cnt_{}".format(b)] = tf.FixedLenFeature([1], tf.int64)
+          record_spec["inp_tup_{}".format(b)] = tf.VarLenFeature(tf.int64)
+          record_spec["tgt_cnt_{}".format(b)] = tf.FixedLenFeature([1], tf.int64)
+          record_spec["tgt_tup_{}".format(b)] = tf.VarLenFeature(tf.int64)
+
+      # retrieve serializedexample
+      example = tf.parse_single_example(
+          serialized=record,
+          features=record_spec)
+
+      # transform permutation tuples to permutation matrices
+      if bin_sizes and use_tpu:
+        _process_perm_feature(example, "inp")
+        _process_perm_feature(example, "tgt")
+
+      # cast int64 into int32
+      # cast sparse to dense
+      for key in list(example.keys()):
+        val = example[key]
+        if tf.keras.backend.is_sparse(val):
+          val = tf.sparse.to_dense(val)
+        if val.dtype == tf.int64:
+          val = tf.to_int32(val)
+        example[key] = val
+
+      if use_tpu:
+        return example
+      else:
+        return example["inputs"], example["labels"]
+
+    file_paths = []
+    for file_name in file_names:
+      file_path = os.path.join(data_dir, file_name)
+      file_paths.append(file_path)
+
+    if split == "train":
+      dataset = tf.data.Dataset.from_tensor_slices(file_paths)
+      if len(file_paths) > 1:
+        dataset = dataset.shuffle(len(file_paths)).repeat()
+        dataset = tf.data.TFRecordDataset(dataset)
+      elif num_hosts > 1:
+        host_id = params["context"].current_host
+        # drop the remaining batches
+        num_batch_per_host = num_batch // num_hosts
+
+        my_start_sample_id = (host_id * num_batch_per_host * num_core_per_host *
+                              per_core_bsz)
+        my_sample_num = num_batch_per_host * num_core_per_host * per_core_bsz
+        dataset = tf.data.TFRecordDataset(dataset).skip(
+            my_start_sample_id).take(my_sample_num)
+      else:
+        dataset = tf.data.TFRecordDataset(dataset)
+
+      dataset = dataset.map(parser).cache().repeat()
+      dataset = dataset.batch(per_core_bsz, drop_remainder=True)
+      dataset = dataset.prefetch(num_core_per_host * per_core_bsz)
+    else:
+      # do not shuffle, repeat or cache in evaluation
+      dataset = tf.data.Dataset.from_tensor_slices(file_paths)
+      dataset = tf.data.TFRecordDataset(dataset)
+      dataset = dataset.map(parser)
+      dataset = dataset.batch(per_core_bsz, drop_remainder=True)
+
+    return dataset
+
+  if split == "train" and num_hosts > 1:
+    record_info["num_batch"] = num_batch // num_hosts
+
+  return input_fn, record_info
+
+
+def load_record_info(record_info_dir, split, per_host_bsz, tgt_len,
+                     num_core_per_host, use_tpu):
+  if use_tpu:
+    record_name = "record_info-{}.bsz-{}.tlen-{}.core-{}.json".format(
+        split, per_host_bsz, tgt_len, num_core_per_host)
+  else:
+    record_name = "record_info-{}.bsz-{}.tlen-{}.json".format(
+        split, per_host_bsz, tgt_len)
+
+  record_info_path = os.path.join(record_info_dir, record_name)
+  with open(record_info_path, "r") as fp:
+    record_info = json.load(fp)
+
+  return record_info
     

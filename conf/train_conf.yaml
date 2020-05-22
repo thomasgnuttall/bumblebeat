@@ -21,10 +21,10 @@ model:
     num_core_per_host: 3 # Number of cores to use, should be a divisor of batch size
 
     ## Experiment (data/checkpoint/directory) ##
-    data_dir: "data/tfrecords" # Where to find tfrecords of training data
-    record_info_dir: "data/tfrecords/" # Where to find record info corpus
-    corpus_info_path: "data/corpus-info.json" # Where to find corpus info json
-    model_dir: 'EXP-groove/full-full-midionly' # Where to store trained model
+    data_dir: "data/groove/full-midionly/tfrecords" # Where to find tfrecords of training data
+    record_info_dir: "data/groove/full-midionly/tfrecords/" # Where to find record info corpus
+    corpus_info_path: "data/groove/full-midionly/corpus-info.json" # Where to find corpus info json
+    model_dir: 'EXP-groove/full-midionly' # Where to store trained model
     do_train: True # Whether to run training
     do_eval: False # Whether to run eval on the dev set
     eval_ckpt_path:  # Checkpoint path for do_test evaluation. If set, model_dir will be ignored. If unset, will use the latest ckpt in model_dir

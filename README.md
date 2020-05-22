@@ -1,7 +1,8 @@
 
+
 # Bumblebeat
 
-Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation
+Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation. This code is an adaptation from the tensorflow implementation of the [Transformer-XL network](https://github.com/kimiyoung/transformer-xl) [2].
 
 ## 1. Dataset
 
@@ -43,7 +44,10 @@ python bumblebeat data-pipeline \
 
 To train...
 
-`bash here`
+```
+python bumblebeat model-pipeline --conf-path <path_to_param_conf>
+```
+
 
 To generate...
 
@@ -60,3 +64,4 @@ To evaluate...
 "Learning to Groove with Inverse Sequence Transformations."
   International Conference on Machine Learning (ICML), 2019.*
 
+[2] Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context - Zihang Dai, Zhilin Yang, Yiming Yang, Jaime Carbonell, Quoc V. Le, Ruslan Salakhutdinov

@@ -1,6 +1,7 @@
 import click
 
 from bumblebeat.data import data_main
+from bumblebeat.model import model_main
 from bumblebeat.utils import load_yaml
 
 @click.group()
@@ -9,10 +10,10 @@ def cli():
 
 
 @cli.command(name="data-pipeline")
-@click.argument('conf_path', type=str, default='conf/train_conf.yaml', required=False)
-@click.argument('pitches_path', type=str, default='conf/drum_pitches.yaml', required=False)
-@click.argument('time_steps_path', type=str, default='conf/time_steps_vocab.yaml', required=False)
-def cmd_run_pipeline(conf_path, pitches_path, time_steps_path):
+@click.option('--conf-path', type=str, default='conf/train_conf.yaml', required=False)
+@click.option('--pitches-path', type=str, default='conf/drum_pitches.yaml', required=False)
+@click.option('--time-steps-path', type=str, default='conf/time_steps_vocab.yaml', required=False)
+def cmd_run_data_pipeline(conf_path, pitches_path, time_steps_path):
     """
     Run data pipeline,
         Download data
@@ -27,6 +28,18 @@ def cmd_run_pipeline(conf_path, pitches_path, time_steps_path):
     time_steps_vocab = load_yaml(time_steps_path)
 
     data_main(conf, pitch_classes, time_steps_vocab)
+
+
+@cli.command(name="model-pipeline")
+@click.option('--conf-path', type=str, default='conf/train_conf.yaml', required=False)
+def cmd_run_model_pipeline(conf_path):
+    """
+    Run model pipeline,
+        Train
+        Store
+    """
+    conf = load_yaml(conf_path)
+    model_main(conf)
 
 
 if __name__ == '__main__':
