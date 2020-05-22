@@ -1,0 +1,161 @@
+# Preprocess and Create TF Records
+# ================================
+# (Get raw data into format ready for transformer)
+# 
+# - Different depending on CPU, GPU or TPU
+# - Wrap in pipeline ready Corpus class
+#   - Identify vocabulary (class of its own) 
+#       - Count and identify unique "tokens"
+#       - ¿Vocabs consistent across datasets?
+#       - Important to consider encoding of "special" tokens
+#       - Attribute of the corpus
+#   - Store vocab as file associated with dataset (for future)
+#   - Load vocab
+#   - Create dictionary of index to symbol and vice versa (as attribute of vocab)
+#   - Consider filtering out uncommon tokens (set max_size of vocab)
+#   - Load and encode data into numpy array (replace tokens with index)
+#       - For train, test and validation (each an attribute of the corpus)
+#   - Pickle corpus
+#   - Pickle alongside metadata of corpus in dictionary
+# - Seperately store train,test, validation to tensorflow records
+#   - With accompanying metadata json
+#   - Binary storage format of tensorflow
+#       - useful for streaming data over a network
+#       - useful for aggregating datasets
+#       - integrates with TF nicely
+#       - datasets arent stored in RAM
+#       - Very efficient data import for sequence data
+
+
+
+### Data Representation ####
+############################
+
+# dev_sequence:
+#     notes length = 15
+#         - pitch
+#         - velocity
+#         - start_time
+#         - end_time
+#         - is_drum
+#         - quantized_start_step
+#         - quantized_end_step
+
+#     min(quantized_end_step) = 1
+#     max(quantized_end_step) = 17
+#     all pitches = {22, 26, 36, 38, 42, 46, 55} (n=7) (out of a possible 22)
+#     unique velocities = {42, 53, 55, 68, 71, 72, 73, 80, 83, 95, 120, 127}
+
+#     34 note attributes
+#     1 ControlChange attribute (<class 'music_pb2.ControlChange'>)
+#     1 descriptor attribute (<google.protobuf.pyext._message.MessageDescriptor object>)
+
+# 
+# ** Apply GrooveConverter **
+#     - triples representation: (hit, velocity, offset)
+#     - each timestep a fixed beat on a grid
+#         - default spacing 16th notes
+#     - binary hits [0, 1]
+#     - velocities continuous between 0 and 1
+#     - offsets continuous between -0.5 and 0.5 --rescaled--> -1 and 1 for tensors
+#     - each timestep contains this representation for each of a fixed list of 9 categories (defined in drums_encoder_decoder.py) (can be changed)
+#     - Each category has a triple representation (hit, velocity, offset) x 9 = 27
+#     - One measure has 16 timesteps (16, 27)
+#     - Dropout can be done here
+#
+# tensors:
+
+# 4 x 1 x 32 x 27*
+# [inputs, outputs, controls, lengths] x ? x measures x category_triple
+# [hits_vectors, velocity_vectors, offset_vectors]
+
+
+# - Experiment with different drum categories
+# - Dropout in GrooveConverter
+# - very important: https://www.twilio.com/blog/training-a-neural-network-on-midi-music-data-with-magenta-and-python
+# - what the fuck are controls
+
+
+# i = 26      # 4 x 1 x 32 x 27*
+
+# ex_dev_sequence = dev_sequences[i]
+# ex_tensor = tensors[i]
+
+# # Each row a timestep
+# # Each column corresponds to hit, velocity, offset for each drum cat
+# # These are equal with no dropout etc...
+# # these are lists of length one
+# inputs = ex_tensor[0][0]
+# outputs = ex_tensor[1][0]
+
+# # These are irrelevant
+# controls = ex_tensor[2] # empty in this case
+# lengths = ex_tensor[3] # just one legnth in this case
+
+# - Use a word 2 vec pretrained model to vectorise the inputs
+# - Ignore embedding layer, use entire sequence as input to every time step
+# - word2vec
+# - ignore velocities/offset
+# - last activation layer should be changed for offsets and velocities
+
+
+# # learning to groove
+    # - softmax on hits
+    # - velocity to sigmoid
+    # - offset to tanh
+
+# 
+# Groove has 22 instruments (separated into 9 categories)
+#
+# Plan
+#   - start with just 9 instruments (no velocity or offeset)
+#        - simplified mapping in groove midi paper (see groove midi page)
+#   - experiment with 22 instruments
+#   - experiment with adding velocity
+#        - bucket into N
+#   - experiment with adding offset
+#       - two aproaches:
+#           - include time tokens (like in Lakhnes)
+#           - include offset buckeets with velocity;
+#                - 9 instruments= 900 tokens, 22 = 22000 tokens
+#   - experiment with adding time tokens (like LakhNes)
+#
+#
+# With 10 offset buckets and 10 velocity buckets
+# 
+
+# BATCHING SEQUENCE DATA
+# - divide sequence into <batch_size> equal portions
+# - Multiply by number of passes
+
+######################################################
+######################################################
+
+
+# Train model
+# ===========
+# - Load corpus metadata to dict
+# - Load record info
+# - Extract from arguments batch size, data directory
+# - In a input_fn:
+#   - Load dataset from tensor slices (tf records) to TFRecordDataset
+#   - parse dataset row by row
+#   - batch data, shuffle and prefetch 
+#       - Prefetch allows later elements to be prepared whilst current element is processed
+# - In a model_fn:
+#   - transpose features
+#   - Initialise (presumably model weights) with uniform or normal
+#   - Instantiate transformer model
+#   - record mean loss
+#   - configure step, learning rate, params,  optimiser and solver
+#   
+#
+#
+#
+#
+#
+
+
+# Predict
+
+# Output

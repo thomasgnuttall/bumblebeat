@@ -1,0 +1,17 @@
+For mapping to less instruments:
+
+Roberts, A., Engel, J., Raffel, C., Hawthorne, C., and Eck, D. A hierarchical latent vector model for learning longterm structure in music. arXiv preprint arXiv:1803.05428, 2018.
+
+Training a Neural Network on MIDI data with Magenta and Python:
+
+https://www.twilio.com/blog/training-a-neural-network-on-midi-music-data-with-magenta-and-python
+
+Relative timing rather than absolute time:
+
+Simon, I. and Oore, S. Performance rnn: Generating music
+with expressive timing and dynamics, 2017.
+
+# Data representation reference
+#Ian Simon and Sageev Oore. Performance RNN:
+#Generating music with expressive timing and dynamics. https://magenta.tensorflow.org/
+#performance-rnn, 2017.
