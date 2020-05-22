@@ -1,0 +1,9 @@
+# Any length silence of length shorter
+# than 100,000 timesteps can be represented
+# efficiently
+# Number of ticks: time token
+1: 0
+10: 1
+100: 2
+1000: 3
+10000: 4
