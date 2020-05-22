@@ -22,7 +22,9 @@ All pipeline configuration is specified in YAML files (typically found in the `c
 There are three YAMLs required to run the pipeline...
 
 `conf` - This is where all pipeline parameters are specified; data, modelling and evaluation. The default files are `conf/train_conf.yaml` and `conf/test_conf.yaml` , you should edit these rather than create your own. More information about each parameter is found within these files. It is important to only pass one to the pipeline at once.
+
 `pitches` - Here lies a list of lists indicating how pitch classes are grouped. Classes in the sublist are considered the same instrument by the pipeline and are tokenised identically. This allows us to reduce complexity easily. The default for this is found in `conf/drum_pitches.yaml`
+
 `time_steps` - This is a dict of mappings between number of ticks (the minimum unit of time in midi sequences) and time tokens. Time tokens are tokens that do not symbolise a pitch but instead, silence. This dict is used to tokenise silences in our midi sequences by replacing silences with the least amount of time tokens possible corresponding to the number of ticks. The default time_steps dict is found at `conf/time_steps_vocab.yaml`.
 
 ### 3.2 CLI commands
