@@ -36,8 +36,8 @@ To download, process and store data. Specify desired parameters in `data` sectio
 ```
 python bumblebeat data-pipeline \
     --conf-path <path_to_param_conf> \
-    --pitches_path <path_to_pitch_conf> \
-    --conf-path <path_to_time_steps_vocab>
+    --pitches-path <path_to_pitch_conf> \
+    --time-steps-path <path_to_time_steps_vocab>
 ```
 
 
