@@ -1,6 +1,6 @@
 Click==7.0
 numpy==1.18.1
-tensorflow==2.1.0
+tensorflow==1.15 # Magenta requires older version
 tensorflow_datasets==2.0.0
 pyyaml>=4.2b1
 

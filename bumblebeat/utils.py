@@ -14,11 +14,7 @@ def load_yaml(fname):
     with open(fname) as f:
         conf = yaml.load(f, Loader=yaml.Loader)
 
-    filename = os.path.splitext(
-        os.path.basename(fname)
-    )[0]
-
-    return {filename: d}
+    return conf
 
 
 def split_range(r1, r2, n):

@@ -33,16 +33,24 @@ def data_main(conf, pitch_classes, time_steps_vocab):
         Dict of {number of ticks: token} for converting silence to tokens
     """
 
+    data_conf = conf['data']
+
     # ARGS in future
-    dataset_name = conf['dataset_name']
-    data_dir = conf['data_dir']
+    dataset_name = data_conf['dataset']
+    data_dir = data_conf['data_dir']
 
     # ARGS for TF records
-    per_host_test_bsz = conf['per_host_test_bsz']
-    tgt_len = conf['tgt_len'] # number of steps to predict
-    batch_size = conf['batch_size']
+    per_host_test_bsz = data_conf['per_host_test_bsz']
+    tgt_len = data_conf['tgt_len'] # number of steps to predict
+    valid_batch_size = data_conf['per_host_valid_bsz']
 
-    corpus = get_corpus(dataset_name, data_dir)
+    corpus = get_corpus(
+                dataset_name, 
+                data_dir, 
+                pitch_classes, 
+                time_steps_vocab,
+                conf['processing']
+            )
 
     save_dir = os.path.join(data_dir, dataset_name, "tfrecords/")
     bumblebeat.utils.create_dir_if_not_exists(save_dir)
@@ -50,19 +58,19 @@ def data_main(conf, pitch_classes, time_steps_vocab):
     # test mode
     # Here we want our data as a single sequence
     if per_host_test_bsz > 0:
-        corpus.convert_to_tf_records("train", save_dir, tgt_len, batch_size)
+        corpus.convert_to_tf_records("valid", save_dir, tgt_len, valid_batch_size)
         return
 
     for split, batch_size in zip(
       ["train", "valid"],
-      [conf['per_host_train_bsz'], conf['per_host_valid_bsz']]):
+      [data_conf['per_host_train_bsz'], data_conf['per_host_valid_bsz']]):
 
         if batch_size <= 0: continue
         print("Converting {} set...".format(split))
         corpus.convert_to_tf_records(split, save_dir, tgt_len, batch_size)
 
 
-def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab):
+def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processing_conf):
     """
     Load groove data into custom Corpus class
     
@@ -76,6 +84,8 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab):
         list of lists indicating pitch class groupings
     time_steps_vocab: dict
         Dict of {number of ticks: token} for converting silence to tokens
+    processing_conf: dict
+        Dict of processing options
 
     Returns
     =======
@@ -96,7 +106,8 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab):
                     data_dir=data_dir,
                     dataset_name=dataset_name,
                     pitch_classes=pitch_classes, 
-                    time_steps_vocab=time_steps_vocab
+                    time_steps_vocab=time_steps_vocab,
+                    processing_conf=processing_conf
                 )
     
         print("Saving dataset...")
@@ -124,6 +135,7 @@ class Corpus:
             dataset_name, 
             pitch_classes,  
             time_steps_vocab,
+            processing_conf,
             n_velocity_buckets=10,
             min_velocity=0,
             max_velocity=127,
@@ -138,6 +150,7 @@ class Corpus:
         self.pitch_classes = pitch_classes
         self.time_steps_vocab = time_steps_vocab
         self.n_velocity_buckets = n_velocity_buckets
+        self.processing_conf=processing_conf
         self.augment_stretch = True
         self.shuffle = True
 
@@ -160,11 +173,11 @@ class Corpus:
         #all_data = self.download_midi(dataset_name, tfds.Split.ALL)
         
         print('Processing dataset TRAIN...')
-        self.train = self.process_dataset(train_data)
+        self.train = self.process_dataset(train_data, conf=processing_conf)
         print('Processing dataset TEST...')
-        self.test = self.process_dataset(test_data)
+        self.test = self.process_dataset(test_data, conf=processing_conf)
         print('Processing dataset VALID...')
-        self.valid = self.process_dataset(valid_data)
+        self.valid = self.process_dataset(valid_data, conf=processing_conf)
         #print('Processing dataset ALL...')
         #self.all = self.process_dataset(all_data)
 
@@ -180,7 +193,7 @@ class Corpus:
             ))
         return dataset
 
-    def process_dataset(self, dataset):
+    def process_dataset(self, dataset, conf):
         """
         Create tensors of triple representation for each sample
         (hit, velocity, offset) for each midi instrument at each timestep
@@ -201,8 +214,6 @@ class Corpus:
         if quantize:
             dev_sequences = [self._quantize(d, steps_per_quarter) for d in dev_sequences]
         
-        self.dev_sequences = dev_sequences
-
         # Filter out those that are not in 4/4 and do not have any notes
         dev_sequences = [
             s for s in dev_sequences 
@@ -411,7 +422,7 @@ def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
     file_name = f"{basename}.bsz-{batch_size}.tlen-{tgt_len}.tfrecords"
 
     save_path = os.path.join(save_dir, file_name)
-    record_writer = tf.python_io.TFRecordWriter(save_path)
+    record_writer = tf.io.TFRecordWriter(save_path)
 
     batched_data = batchify(data, batch_size)
 

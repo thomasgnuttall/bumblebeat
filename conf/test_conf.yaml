@@ -1,14 +1,14 @@
 data_root: 'data/' # Directory ot store data
-batch_size: 6 # Number of batches to split data into
-tgt_len: 512 # Number of steps to predict
+batch_size: &batch_size 6 # Number of batches to split data into
+tgt_len: &tgt_len 512 # Number of steps to predict
 
 data:
-    data_dir: {{data_root}}
+    data_dir: data/
     dataset: 'groove/full-full-midionly' # Datset name (to be downloaded from tensorflow dataset)
-    tgt_len: {{tgt_len}} 
-    per_host_train_bsz: {{batch_size}}
-    per_host_valid_bsz: {{batch_size}}
-    per_host_test_bsz: {{batch_size}}
+    tgt_len: *tgt_len
+    per_host_train_bsz: *batch_size
+    per_host_valid_bsz: *batch_size
+    per_host_test_bsz: *batch_size
 
 processing:
     quantize: True # After this line for groove converter
@@ -21,10 +21,10 @@ model:
     num_core_per_host: 3 # Number of cores to use, should be a divisor of batch size
 
     ## Experiment (data/checkpoint/directory) ##
-    data_dir: "{{data_root}}/tfrecords" # Where to find tfrecords of training data
-    record_info_dir: "{{data_root}}/tfrecords/" # Where to find record info corpus
-    corpus_info_path: "{{data_root}}/corpus-info.json" # Where to find corpus info json
-    model_dir: 'EXP-"{{dataset}}' # Where to store trained model
+    data_dir: "data//tfrecords" # Where to find tfrecords of training data
+    record_info_dir: "data/tfrecords/" # Where to find record info corpus
+    corpus_info_path: "data/corpus-info.json" # Where to find corpus info json
+    model_dir: 'EXP-groove/full-full-midionly' # Where to store trained model
     do_train: False # Whether to run training
     do_eval: True # Whether to run eval on the dev set
     eval_ckpt_path:  # Checkpoint path for do_test evaluation. If set, model_dir will be ignored. If unset, will use the latest ckpt in model_dir
@@ -38,8 +38,8 @@ model:
     
     ## Training ##
     train_steps: 1 # Total umber of training steps
-    train_batch_size: {{batch_size}} # Size of train batch
-    eval_batch_size: {{batch_size}} # Size of valid batch
+    train_batch_size: *batch_size # Size of train batch
+    eval_batch_size: *batch_size # Size of valid batch
     iterations: 200 # Number of iterations per repeat loop
     save_steps: 4000 # Number of steps for model checkpointing
 
@@ -51,7 +51,7 @@ model:
     eval_split: "test" # Which data split to evaluate
 
     ## Model ##
-    tgt_len: {{tgt_len}} 
+    tgt_len: *tgt_len
     mem_len: 512 # Number of steps to cache
     same_length: False # Same length attention
     clamp_len: 1 # Clamp length

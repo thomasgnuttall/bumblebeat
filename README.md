@@ -13,6 +13,8 @@ To install Bumblebeat and all dependencies...
 
 `pip install -e .`
 
+Ensure that your pip version and python version are in sync.
+
 ## 3. Usage
 
 ### 3.1 Configuration Files
@@ -33,9 +35,9 @@ To download, process and store data. Specify desired parameters in `data` sectio
 
 ```
 python bumblebeat data-pipeline \
-	--conf-path <path_to_param_conf> \
-	--pitches_path <path_to_pitch_conf> \
-	--conf-path <path_to_time_steps_vocab> \
+    --conf-path <path_to_param_conf> \
+    --pitches_path <path_to_pitch_conf> \
+    --conf-path <path_to_time_steps_vocab>
 ```
 
 

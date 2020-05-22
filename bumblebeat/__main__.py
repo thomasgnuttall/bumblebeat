@@ -9,9 +9,9 @@ def cli():
 
 
 @cli.command(name="data-pipeline")
-@click.argument(conf_path, nargs=1, default='..conf/train_conf.yaml')
-@click.argument(pitches_path, nargs=1, default='..conf/test_conf.yaml')
-@click.argument(time_steps_path, nargs=1, default='..conf/time_steps_path.yaml')
+@click.argument('conf_path', type=str, default='conf/train_conf.yaml', required=False)
+@click.argument('pitches_path', type=str, default='conf/drum_pitches.yaml', required=False)
+@click.argument('time_steps_path', type=str, default='conf/time_steps_vocab.yaml', required=False)
 def cmd_run_pipeline(conf_path, pitches_path, time_steps_path):
     """
     Run data pipeline,
@@ -22,7 +22,7 @@ def cmd_run_pipeline(conf_path, pitches_path, time_steps_path):
     conf = load_yaml(conf_path)
     
     pitch_classes_yaml = load_yaml(pitches_path)
-    pitch_classes = pitch_classes['DEFAULT_DRUM_TYPE_PITCHES']
+    pitch_classes = pitch_classes_yaml['DEFAULT_DRUM_TYPE_PITCHES']
 
     time_steps_vocab = load_yaml(time_steps_path)
 
