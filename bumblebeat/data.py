@@ -16,9 +16,22 @@ from tensorflow.gfile import Exists as exists
 import bumblebeat.utils
 import bumblebeat.vocabulary
 
-def main(unused_argv):
-    
-    del unused_argv  # Unused
+def data_main(conf, pitch_classes, time_steps_vocab):
+    """
+    Run data pipeline
+        Download data
+        Process
+        Store as TF Records
+
+    Params
+    ======
+    conf: dict
+        Dict of pipeline parameters
+    pitch_classes: list
+        list of lists indicating pitch class groupings
+    time_steps_vocab: dict
+        Dict of {number of ticks: token} for converting silence to tokens
+    """
 
     # ARGS in future
     dataset_name = conf['dataset_name']
@@ -37,23 +50,32 @@ def main(unused_argv):
     # test mode
     # Here we want our data as a single sequence
     if per_host_test_bsz > 0:
-        corpus.convert_to_tf_records(
-          "train", save_dir, tgt_len, batch_size, conf)
+        corpus.convert_to_tf_records("train", save_dir, tgt_len, batch_size)
         return
 
     for split, batch_size in zip(
       ["train", "valid"],
-      [FLAGS.per_host_train_bsz, FLAGS.per_host_valid_bsz]):
+      [conf['per_host_train_bsz'], conf['per_host_valid_bsz']]):
 
         if batch_size <= 0: continue
         print("Converting {} set...".format(split))
-        corpus.convert_to_tf_records(split, save_dir, batch_size, FLAGS.tgt_len,
-                                    FLAGS.num_core_per_host, FLAGS=FLAGS)
+        corpus.convert_to_tf_records(split, save_dir, tgt_len, batch_size)
 
 
-def get_corpus(dataset_name, data_dir):
+def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab):
     """
     Load groove data into custom Corpus class
+    
+    Param
+    =====
+    dataset_name: str
+        Name of groove dataset to download from tensorflow datasets
+    data_dir: str
+        Path to store data in (corpus, tf records)
+    pitch_classes: list
+        list of lists indicating pitch class groupings
+    time_steps_vocab: dict
+        Dict of {number of ticks: token} for converting silence to tokens
 
     Returns
     =======
@@ -70,7 +92,12 @@ def get_corpus(dataset_name, data_dir):
         bumblebeat.utils.create_dir_if_not_exists(fn)
 
         print("Producing dataset...")
-        corpus = Corpus(data_dir, dataset_name)
+        corpus = Corpus(
+                    data_dir=data_dir,
+                    dataset_name=dataset_name,
+                    pitch_classes=pitch_classes, 
+                    time_steps_vocab=time_steps_vocab
+                )
     
         print("Saving dataset...")
         with open(fn, "wb") as fp:
@@ -95,8 +122,8 @@ class Corpus:
             self, 
             data_dir, 
             dataset_name, 
-            pitch_classes=DEFAULT_DRUM_TYPE_PITCHES,  
-            time_steps_vocab=time_steps_vocab,
+            pitch_classes,  
+            time_steps_vocab,
             n_velocity_buckets=10,
             min_velocity=0,
             max_velocity=127,
@@ -191,7 +218,7 @@ class Corpus:
 
         return tokens
     
-    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size, conf):
+    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size):
         """
         Convert tensor data to TF records and store
         """

@@ -8,6 +8,7 @@ data:
     tgt_len: {{tgt_len}} 
     per_host_train_bsz: {{batch_size}}
     per_host_valid_bsz: {{batch_size}}
+    per_host_test_bsz: {{batch_size}}
 
 processing:
     quantize: True # After this line for groove converter
