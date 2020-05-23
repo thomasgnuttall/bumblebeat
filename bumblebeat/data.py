@@ -201,8 +201,8 @@ class Corpus:
 
     def process_dataset(self, dataset, conf):
         """
-        Create tensors of triple representation for each sample
-        (hit, velocity, offset) for each midi instrument at each timestep
+        Augment, transform and tokenize each sample in <dataset>
+        Return: list of tokenised sequences
         """
         # Abstract to ARGS at some point
         quantize = conf['quantize']
