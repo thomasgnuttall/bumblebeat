@@ -38,7 +38,7 @@ To download, process and store data. Specify desired parameters in `data` sectio
 python bumblebeat data-pipeline \
     --conf-path 'conf/train_conf.yaml' \
     --pitches-path 'conf/drum_pitches.yaml' \
-    --time-steps-path 'conf/time_steps_vocab'
+    --time-steps-path 'conf/time_steps_vocab.yaml'
 ```
 
 (alter paths as necessary)
