@@ -18,7 +18,7 @@ processing:
 
 model:
     ## GPU ##
-    num_core_per_host: 3 # Number of cores to use, should be a divisor of batch size
+    num_core_per_host: 1 # Number of cores to use, should be a divisor of batch size
 
     ## Experiment (data/checkpoint/directory) ##
     data_dir: "data//tfrecords" # Where to find tfrecords of training data

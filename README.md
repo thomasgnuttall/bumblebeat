@@ -18,6 +18,7 @@ Ensure that your pip version and python version are in sync.
 
 ## 3. Usage
 
+It is important 
 ### 3.1 Configuration Files
 
 All pipeline configuration is specified in YAML files (typically found in the `conf/` folder) passed to the the CLI (**3.2 CLI commands**) .
@@ -47,7 +48,7 @@ python bumblebeat data-pipeline \
 To train...
 
 ```
-python bumblebeat model-pipeline --conf-path 'conf/test_conf.yaml'
+python bumblebeat model-pipeline --conf-path 'conf/train_conf.yaml'
 ```
 
 

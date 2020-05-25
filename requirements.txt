@@ -1,6 +1,11 @@
 Click==7.0
 numpy==1.18.1
 magenta==1.2.2
+
+# Which tensorflow to use depends on whether or not
+# you have access to a GPU
 tensorflow==1.15.2 # Magenta requires older version
+# tensorflow-gpu==1.15 # Magenta requires older version
+
 tensorflow_datasets==2.0.0
 pyyaml>=4.2b1

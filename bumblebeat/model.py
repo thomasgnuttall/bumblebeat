@@ -11,6 +11,7 @@ import tensorflow as tf
 import numpy as np
 
 import bumblebeat.data
+import bumblebeat.utils
 from bumblebeat.gpu_utils import assign_to_gpu, average_grads_and_vars
 import bumblebeat.transformer as transformer
 
@@ -232,6 +233,7 @@ def train(n_token, cutoffs, ps_device, conf):
 
         if curr_step > 0 and curr_step % conf['save_steps'] == 0:
           save_path = os.path.join(conf['model_dir'], "model.ckpt")
+          bumblebeat.utils.create_dir_if_not_exists(save_path)
           saver.save(sess, save_path)
           tf.logging.info("Model saved in path: {}".format(save_path))
 

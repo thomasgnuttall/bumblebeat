@@ -37,7 +37,7 @@ model:
     min_lr_ratio: 0.004 # Minimum ratio learning rate (for cosine decay)
     
     ## Training ##
-    train_steps: 1 # Total umber of training steps
+    train_steps: 400000 # Total umber of training steps
     train_batch_size: *batch_size # Size of train batch
     eval_batch_size: *batch_size # Size of valid batch
     iterations: 200 # Number of iterations per repeat loop
