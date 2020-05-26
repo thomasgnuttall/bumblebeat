@@ -1,5 +1,6 @@
 
 
+
 # Bumblebeat
 
 Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation. This code is an adaptation of the tensorflow implementation of the [Transformer-XL network](https://github.com/kimiyoung/transformer-xl) [2].
@@ -15,6 +16,9 @@ To install Bumblebeat and all dependencies...
 `pip install -e .`
 
 Ensure that your pip version and python version are in sync.
+
+### 3.1 Getting Started on AWS
+The script `scripts/aws_init.sh` contains all you need to setup the development environment on AWS with the *Deep Learning Base AMI (Amazon Linux 2) Version 24.0*. It is recommended to run the script in stages rather than as one.
 
 ## 3. Usage
 
@@ -50,6 +54,12 @@ To train...
 python bumblebeat model-pipeline --conf-path 'conf/train_conf.yaml'
 ```
 
+To evaluate...
+
+```
+python bumblebeat model-pipeline --conf-path 'conf/test_conf.yaml'
+```
+(note that the difference in the last two steps is whether or not `do_train` or `do_eval` are True or False)
 
 To generate...
 
