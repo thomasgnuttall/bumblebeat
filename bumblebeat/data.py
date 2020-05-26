@@ -43,6 +43,8 @@ def data_main(conf, pitch_classes, time_steps_vocab):
     per_host_test_bsz = data_conf['per_host_test_bsz']
     tgt_len = data_conf['tgt_len'] # number of steps to predict
     valid_batch_size = data_conf['per_host_valid_bsz']
+    train_batch_size = data_conf['per_host_train_bsz']
+    test_batch_size = data_conf['per_host_test_bsz']
 
     corpus = get_corpus(
                 dataset_name, 
@@ -57,17 +59,12 @@ def data_main(conf, pitch_classes, time_steps_vocab):
 
     # test mode
     # Here we want our data as a single sequence
-    if per_host_test_bsz > 0:
-        corpus.convert_to_tf_records("valid", save_dir, tgt_len, valid_batch_size)
-        return
-
-    for split, batch_size in zip(
-      ["train", "valid"],
-      [data_conf['per_host_train_bsz'], data_conf['per_host_valid_bsz']]):
-
-        if batch_size <= 0: continue
-        print("Converting {} set...".format(split))
-        corpus.convert_to_tf_records(split, save_dir, tgt_len, batch_size)
+    print("Converting train set...")
+    corpus.convert_to_tf_records("train", save_dir, tgt_len, train_batch_size)
+    print("Converting test set...")
+    corpus.convert_to_tf_records("test", save_dir, tgt_len, test_batch_size)
+    print("Converting valid set...")
+    corpus.convert_to_tf_records("valid", save_dir, tgt_len, valid_batch_size)
 
 
 def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processing_conf):
