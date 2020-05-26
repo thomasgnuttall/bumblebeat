@@ -8,7 +8,7 @@ data:
     tgt_len: *tgt_len
     per_host_train_bsz: *batch_size
     per_host_valid_bsz: *batch_size
-    per_host_test_bsz: 0
+    per_host_test_bsz: *batch_size
 
 processing:
     quantize: True # After this line for groove converter
@@ -61,8 +61,8 @@ model:
     n_head: 8 # Number of attention heads
     d_head: 64 # Dimension of each attention head
     d_inner: 2048 # Dimension of inner hidden size in positionwise feed-forward
-    dropout: 0.1 # Dropout rate
-    dropatt: 0.0 # Attention dropout rate
+    dropout: 0.2 # Dropout rate
+    dropatt: 0.1 # Attention dropout rate
     untie_r: False # untie r_w_bias and r_r_bias?
  
     ## Adaptive Softmax / Embedding ##
