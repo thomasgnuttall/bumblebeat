@@ -20,6 +20,8 @@ Ensure that your pip version and python version are in sync.
 ### 3.1 Getting Started on AWS
 The script `scripts/aws_init.sh` contains all you need to setup the development environment on AWS with the *Deep Learning Base AMI (Amazon Linux 2) Version 24.0*. It is recommended to run the script in stages rather than as one.
 
+It is important to note that if you intend to rely on GPUs you must make sure the correct requirement is uncommented in `requirements.txt` (more details there).
+
 ## 3. Usage
 
 ### 3.1 Configuration Files
