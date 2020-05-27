@@ -9,9 +9,10 @@ import numpy as np
 from magenta import music as mm
 from magenta.models.music_vae import data as vae_data
 
-import tensorflow as tf
 import tensorflow_datasets as tfds
 from tensorflow.gfile import Exists as exists
+
+import torch
 
 import bumblebeat.utils
 import bumblebeat.vocabulary
@@ -54,18 +55,11 @@ def data_main(conf, pitch_classes, time_steps_vocab):
                 conf['processing']
             )
 
-    save_dir = os.path.join(data_dir, dataset_name, "tfrecords/")
-    bumblebeat.utils.create_dir_if_not_exists(save_dir)
-
-    # test mode
-    # Here we want our data as a single sequence
-    print("Converting train set...")
-    corpus.convert_to_tf_records("train", save_dir, tgt_len, train_batch_size)
-    print("Converting test set...")
-    corpus.convert_to_tf_records("test", save_dir, tgt_len, test_batch_size)
-    print("Converting valid set...")
-    corpus.convert_to_tf_records("valid", save_dir, tgt_len, valid_batch_size)
-
+    print ('-' * 10)
+    print ('Train iterator')
+    for batch in corpus.get_iterator('train', bsz=9, bptt=100):
+        print(batch)
+        break
 
 def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processing_conf):
     """
@@ -110,22 +104,76 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processi
         print("Saving dataset...")
         with open(fn, "wb") as fp:
             pickle.dump(corpus, fp, protocol=2)
-        
-        corpus_info = {
-          "vocab_size" : corpus.vocab_size,
-          "dataset" : corpus.dataset_name,
-          'cutoffs': []
-        }
-        with open(os.path.join(data_dir, dataset_name, "corpus-info.json"), "w") as fp:
-            json.dump(corpus_info, fp)
 
     return corpus
 
 
-def get_corpus_info(corpus_info_path):
-  with open(corpus_info_path, "r") as fp:
-    corpus_info = json.load(fp)
-  return corpus_info
+class LMShuffledIterator(object):
+    def __init__(self, data, bsz, bptt, device='cpu', ext_len=None):
+        """
+            data -- list[LongTensor] -- there is no order among the LongTensors
+        """
+        self.data = iter(data)
+
+        self.bsz = bsz
+        self.bptt = bptt
+        self.ext_len = ext_len if ext_len is not None else 0
+
+        self.device = device
+
+    def stream_iterator(self, sent_stream):
+        # streams for each data in the batch
+        streams = [None] * self.bsz
+
+        data = torch.LongTensor(self.bptt, self.bsz)
+        target = torch.LongTensor(self.bptt, self.bsz)
+
+        n_retain = 0
+
+        while True:
+            # data   : [n_retain+bptt x bsz]
+            # target : [bptt x bsz]
+            data[n_retain:].fill_(-1)
+            target.fill_(-1)
+
+            valid_batch = True
+
+            for i in range(self.bsz):
+                n_filled = 0
+                try:
+                    while n_filled < self.bptt:
+                        if streams[i] is None or len(streams[i]) <= 1:
+                            streams[i] = next(sent_stream)
+                        # number of new tokens to fill in
+                        n_new = min(len(streams[i]) - 1, self.bptt - n_filled)
+                        # first n_retain tokens are retained from last batch
+                        data[n_retain+n_filled:n_retain+n_filled+n_new, i] = \
+                            streams[i][:n_new]
+                        target[n_filled:n_filled+n_new, i] = \
+                            streams[i][1:n_new+1]
+                        streams[i] = streams[i][n_new:]
+                        n_filled += n_new
+                except StopIteration:
+                    valid_batch = False
+                    break
+
+            if not valid_batch:
+                return
+
+            data = data.to(self.device)
+            target = target.to(self.device)
+
+            yield data, target, self.bptt
+
+            n_retain = min(data.size(0), self.ext_len)
+            if n_retain > 0:
+                data[:n_retain] = data[-n_retain:]
+            data.resize_(n_retain + self.bptt, data.size(1))
+
+    def __iter__(self):
+        # sent_stream is an iterator
+        for batch in self.stream_iterator(self.data):
+            yield batch
 
 
 class Corpus:
@@ -181,8 +229,6 @@ class Corpus:
         self.test = self.process_dataset(test_data, conf=processing_conf)
         print('Processing dataset VALID...')
         self.valid = self.process_dataset(valid_data, conf=processing_conf)
-        #print('Processing dataset ALL...')
-        #self.all = self.process_dataset(all_data)
 
         # TODO: Augment Data
 
@@ -232,29 +278,14 @@ class Corpus:
 
         return tokens
     
-    def convert_to_tf_records(self, split, save_dir, tgt_len, batch_size):
-        """
-        Convert tensor data to TF records and store
-        """
-        # Our data is many small sequences,
-        # we batch on a sample level
-        data = getattr(self, split)
+    def get_iterator(self, split, *args, **kwargs):
+        if split == 'train':
+            data_iter = LMShuffledIterator(self.train, *args, **kwargs)
+        elif split in ['valid', 'test']:
+            data = self.valid if split == 'valid' else self.test
+            data_iter = LMShuffledIterator(data, *args, **kwargs)
 
-        file_names = []
-        record_name = f"record_info-{split}.bsz-{batch_size}.tlen-{tgt_len}.json"
-        record_info_path = os.path.join(save_dir, record_name)
-        
-        file_name, num_batch = create_ordered_tfrecords(save_dir, split, data, tgt_len, batch_size)
-
-        file_names.append(file_name)
-
-        with open(record_info_path, "w") as fp:
-            record_info = {
-              "filenames": file_names,
-              "bin_sizes": [], # No bins here
-              "num_batch": num_batch
-            }
-            json.dump(record_info, fp)
+        return data_iter
 
     def _augment_stretch(self, note_sequences):
         """
@@ -311,7 +342,7 @@ class Corpus:
 
             filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
 
-        return filled
+        return torch.tensor(filled)
 
     def _tokenize_w_ticks(self, triples, ticks_per_second, pitch_vocab, time_steps_vocab):
         """
@@ -415,208 +446,4 @@ class Corpus:
                 class_map[pitch] = cls
         return class_map
 
-
-def _int64_feature(values):
-  return tf.train.Feature(int64_list=tf.train.Int64List(value=values))
-
-
-def create_ordered_tfrecords(save_dir, basename, data, tgt_len, batch_size):
-    
-    file_name = f"{basename}.bsz-{batch_size}.tlen-{tgt_len}.tfrecords"
-
-    save_path = os.path.join(save_dir, file_name)
-    record_writer = tf.io.TFRecordWriter(save_path)
-
-    batched_data = batchify(data, batch_size)
-
-    num_batch = 0
-    # for t in range(0, batched_data.shape[1] - tgt_len - 1, tgt_len):
-    for t in range(0, batched_data.shape[1] - 1, tgt_len):
-      cur_tgt_len = min(batched_data.shape[1] - 1 - t, tgt_len)
-      # drop the remainder if use tpu
-      if num_batch % 500 == 0:
-        print("  processing batch {}".format(num_batch))
-      for idx in range(batch_size):
-        inputs = batched_data[idx, t:t + cur_tgt_len]
-        labels = batched_data[idx, t + 1:t + cur_tgt_len + 1]
-
-        # features dict
-        feature = {
-            "inputs": _int64_feature(inputs),
-            "labels": _int64_feature(labels),
-        }
-
-        example = tf.train.Example(features=tf.train.Features(feature=feature))
-        record_writer.write(example.SerializeToString())
-
-      num_batch += 1
-
-    record_writer.close()
-    print("Done writing {}. batches: {}".format(file_name, num_batch))
-
-    return file_name, num_batch
-
-
-def batchify(data, batch_size):
-    """
-    Create training batches
-    """
-    # Create one long sequence of data with individual samples
-    # divided by end of sequence token, -1
-    seq = functools.reduce(lambda x,y: x+[-1]+y, data)
-    eos = max(seq) + 1 #  add new token for end of sequence
-    seq = np.array([x if x != -1 else eos for x in seq])
-
-    num_step = len(seq) // batch_size
-    seq = seq[:batch_size * num_step]
-    seq = seq.reshape(batch_size, num_step)
-
-    return seq
-
-
-def get_input_fn(record_info_dir, split, per_host_bsz, tgt_len,
-                 num_core_per_host, num_hosts=1, use_tpu=False):
-  """Creates input function."""
-  record_info = load_record_info(record_info_dir, split, per_host_bsz, tgt_len,
-                                 num_core_per_host, use_tpu=use_tpu)
-
-  file_names = record_info["filenames"]
-  bin_sizes = record_info["bin_sizes"]
-  num_batch = record_info["num_batch"]
-
-  tf.logging.info("[{}] File names {}".format(split, file_names))
-
-  def input_fn(params):
-    # per-core batch size
-    per_core_bsz = params["batch_size"]
-
-    # data_dir could be a remote path, e.g., a google storage url
-    data_dir = params["data_dir"]
-
-    def parser(record):
-      # preprocess "inp_perm" and "tgt_perm"
-      def _process_perm_feature(example, prefix):
-        for b in range(len(bin_sizes)):
-          cnt = example.pop("{}_cnt_{}".format(prefix, b))[0]
-          tup = example.pop("{}_tup_{}".format(prefix, b))
-
-          tup = tf.reshape(
-              tf.sparse_tensor_to_dense(tup),
-              shape=[cnt, 2])
-
-          # tf.float32
-          perm = tf.sparse_to_dense(
-              sparse_indices=tup,
-              output_shape=[tgt_len, bin_sizes[b]],
-              sparse_values=1.0,
-              default_value=0.0)
-
-          example["{}_perm_{}".format(prefix, b)] = perm
-
-      # whether allow the last batch with a potentially shorter length
-      if use_tpu:
-        record_spec = {
-            "inputs": tf.FixedLenFeature([tgt_len], tf.int64),
-            "labels": tf.FixedLenFeature([tgt_len], tf.int64),
-        }
-      else:
-        record_spec = {
-            "inputs": tf.VarLenFeature(tf.int64),
-            "labels": tf.VarLenFeature(tf.int64),
-        }
-
-      # permutation related features
-      if bin_sizes and use_tpu:
-        # tf.float32
-        record_spec["inp_mask"] = tf.FixedLenFeature([tgt_len], tf.float32)
-        record_spec["tgt_mask"] = tf.FixedLenFeature([tgt_len], tf.float32)
-
-        record_spec["head_labels"] = tf.FixedLenFeature([tgt_len], tf.int64)
-
-        for b in range(len(bin_sizes)):
-          record_spec["inp_cnt_{}".format(b)] = tf.FixedLenFeature([1], tf.int64)
-          record_spec["inp_tup_{}".format(b)] = tf.VarLenFeature(tf.int64)
-          record_spec["tgt_cnt_{}".format(b)] = tf.FixedLenFeature([1], tf.int64)
-          record_spec["tgt_tup_{}".format(b)] = tf.VarLenFeature(tf.int64)
-
-      # retrieve serializedexample
-      example = tf.parse_single_example(
-          serialized=record,
-          features=record_spec)
-
-      # transform permutation tuples to permutation matrices
-      if bin_sizes and use_tpu:
-        _process_perm_feature(example, "inp")
-        _process_perm_feature(example, "tgt")
-
-      # cast int64 into int32
-      # cast sparse to dense
-      for key in list(example.keys()):
-        val = example[key]
-        if tf.keras.backend.is_sparse(val):
-          val = tf.sparse.to_dense(val)
-        if val.dtype == tf.int64:
-          val = tf.to_int32(val)
-        example[key] = val
-
-      if use_tpu:
-        return example
-      else:
-        return example["inputs"], example["labels"]
-
-    file_paths = []
-    for file_name in file_names:
-      file_path = os.path.join(data_dir, file_name)
-      file_paths.append(file_path)
-
-    if split == "train":
-      dataset = tf.data.Dataset.from_tensor_slices(file_paths)
-      if len(file_paths) > 1:
-        dataset = dataset.shuffle(len(file_paths)).repeat()
-        dataset = tf.data.TFRecordDataset(dataset)
-      elif num_hosts > 1:
-        host_id = params["context"].current_host
-        # drop the remaining batches
-        num_batch_per_host = num_batch // num_hosts
-
-        my_start_sample_id = (host_id * num_batch_per_host * num_core_per_host *
-                              per_core_bsz)
-        my_sample_num = num_batch_per_host * num_core_per_host * per_core_bsz
-        dataset = tf.data.TFRecordDataset(dataset).skip(
-            my_start_sample_id).take(my_sample_num)
-      else:
-        dataset = tf.data.TFRecordDataset(dataset)
-
-      dataset = dataset.map(parser).cache().repeat()
-      dataset = dataset.batch(per_core_bsz, drop_remainder=True)
-      dataset = dataset.prefetch(num_core_per_host * per_core_bsz)
-    else:
-      # do not shuffle, repeat or cache in evaluation
-      dataset = tf.data.Dataset.from_tensor_slices(file_paths)
-      dataset = tf.data.TFRecordDataset(dataset)
-      dataset = dataset.map(parser)
-      dataset = dataset.batch(per_core_bsz, drop_remainder=True)
-
-    return dataset
-
-  if split == "train" and num_hosts > 1:
-    record_info["num_batch"] = num_batch // num_hosts
-
-  return input_fn, record_info
-
-
-def load_record_info(record_info_dir, split, per_host_bsz, tgt_len,
-                     num_core_per_host, use_tpu):
-  if use_tpu:
-    record_name = "record_info-{}.bsz-{}.tlen-{}.core-{}.json".format(
-        split, per_host_bsz, tgt_len, num_core_per_host)
-  else:
-    record_name = "record_info-{}.bsz-{}.tlen-{}.json".format(
-        split, per_host_bsz, tgt_len)
-
-  record_info_path = os.path.join(record_info_dir, record_name)
-  with open(record_info_path, "r") as fp:
-    record_info = json.load(fp)
-
-  return record_info
     
