@@ -2,7 +2,7 @@ import click
 
 from bumblebeat.data import data_main
 from bumblebeat.model import model_main
-from bumblebeat.utils import load_yaml
+from bumblebeat.utils.data import load_yaml
 
 @click.group()
 def cli():

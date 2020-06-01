@@ -14,7 +14,7 @@ from tensorflow.gfile import Exists as exists
 
 import torch
 
-import bumblebeat.utils
+import bumblebeat.utils.data as utils
 import bumblebeat.vocabulary
 
 def data_main(conf, pitch_classes, time_steps_vocab):
@@ -40,12 +40,7 @@ def data_main(conf, pitch_classes, time_steps_vocab):
     dataset_name = data_conf['dataset']
     data_dir = data_conf['data_dir']
 
-    # ARGS for TF records
-    per_host_test_bsz = data_conf['per_host_test_bsz']
-    tgt_len = data_conf['tgt_len'] # number of steps to predict
-    valid_batch_size = data_conf['per_host_valid_bsz']
     train_batch_size = data_conf['per_host_train_bsz']
-    test_batch_size = data_conf['per_host_test_bsz']
 
     corpus = get_corpus(
                 dataset_name, 
@@ -57,7 +52,7 @@ def data_main(conf, pitch_classes, time_steps_vocab):
 
     print ('-' * 10)
     print ('Train iterator')
-    for batch in corpus.get_iterator('train', bsz=9, bptt=100):
+    for batch in corpus.get_iterator('train', bsz=train_batch_size, bptt=100):
         print(batch)
         break
 

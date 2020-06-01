@@ -38,7 +38,7 @@ There are three YAMLs required to run the pipeline...
 
 ### 3.2 CLI commands
 
-To download, process and store data. Specify desired parameters in `data` section of  `conf` and run...
+To test the data processing is functioning correctly you can run...
 
 ```
 python bumblebeat data-pipeline \
@@ -47,7 +47,7 @@ python bumblebeat data-pipeline \
     --time-steps-path 'conf/time_steps_vocab.yaml'
 ```
 
-(alter paths as necessary)
+And batched train data will be printed to screens. (Alter paths as necessary)
 
 
 To train...

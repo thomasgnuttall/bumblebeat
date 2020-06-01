@@ -1,363 +1,416 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import os
-import math
+# coding: utf-8
+import argparse
 import time
-
-import tensorflow as tf
+import math
+import os, sys
+import itertools
 
 import numpy as np
 
-import bumblebeat.data
-import bumblebeat.utils
-from bumblebeat.gpu_utils import assign_to_gpu, average_grads_and_vars
-import bumblebeat.transformer as transformer
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+from bumblebeat.data import get_corpus
+from bumblebeat.transformer import MemTransformerLM
+from utils.exp_utils import create_exp_dir
+from utils.data_parallel import BalancedDataParallel
 
 
-def get_model_fn(n_token, cutoffs, conf):
-    def model_fn(inp, tgt, mems, is_training, conf):
-        inp = tf.transpose(inp, [1, 0])
-        tgt = tf.transpose(tgt, [1, 0])
+if model_conf['d_embed'] < 0:
+    model_conf['d_embed'] = model_conf['d_model']
+    
+assert model_conf['ext_len'] >= 0, 'extended context length must be non-negative'
+assert model_conf['batch_size'] % model_conf['batch_chunk'] == 0
 
-        if conf['init'] == "uniform":
-          initializer = tf.initializers.random_uniform(
-              minval=-conf['init_range'],
-              maxval=conf['init_range'],
-              seed=None)
-        elif conf['init'] == "normal":
-          initializer = tf.initializers.random_normal(
-              stddev=conf['init_std'],
-              seed=None)
-          proj_initializer = tf.initializers.random_normal(
-              stddev=conf['proj_init_std'],
-              seed=None)
+model_conf['work_dir'] = '{}-{}'.format(model_conf['work_dir'], model_conf['dataset'])
+model_conf['work_dir'] = os.path.join(model_conf['work_dir'], time.strftime('%Y%m%d-%H%M%S'))
+logging = create_exp_dir(model_conf['work_dir'],
+    scripts_to_save=['train.py', 'mem_transformer.py'], debug=model_conf['debug'])
 
-        tie_projs = [False for _ in range(len(cutoffs) + 1)]
-        if conf['proj_share_all_but_first']:
-          for i in range(1, len(tie_projs)):
-            tie_projs[i] = True
+# Set the random seed manually for reproducibility.
+np.random.seed(model_conf['seed'])
+torch.manual_seed(model_conf['seed'])
+if torch.cuda.is_available():
+    if not model_conf['cuda']:
+        print('WARNING: You have a CUDA device, so you should probably run with --cuda')
+    else:
+        torch.cuda.manual_seed_all(model_conf['seed'])
 
-        loss, new_mems = transformer.transformer(
-            dec_inp=inp,
-            target=tgt,
-            mems=mems,
-            n_token=n_token,
-            n_layer=conf['n_layer'],
-            d_model=conf['d_model'],
-            d_embed=conf['d_embed'],
-            n_head=conf['n_head'],
-            d_head=conf['d_head'],
-            d_inner=conf['d_inner'],
-            dropout=conf['dropout'],
-            dropatt=conf['dropatt'],
-            initializer=initializer,
-            proj_initializer=proj_initializer,
-            is_training=is_training,
-            mem_len=conf['mem_len'],
-            cutoffs=cutoffs,
-            div_val=conf['div_val'],
-            tie_projs=tie_projs,
-            input_perms=None,
-            target_perms=None,
-            head_target=None,
-            same_length=conf['same_length'],
-            clamp_len=conf['clamp_len'],
-            use_tpu=False,
-            untie_r=conf['untie_r'],
-            proj_same_dim=conf['proj_same_dim'])
+# Validate `--fp16` option
+if model_conf['fp16']:
+    if not model_conf['cuda']:
+        print('WARNING: --fp16 requires --cuda, ignoring --fp16 option')
+        model_conf['fp16'] = False
+    else:
+        try:
+            from apex.fp16_utils import FP16_Optimizer
+        except:
+            print('WARNING: apex not installed, ignoring --fp16 option')
+            model_conf['fp16'] = False
 
-        # number of parameters
-        num_params = sum([np.prod(v.shape) for v in tf.trainable_variables()])
-        tf.logging.info('#params: {}'.format(num_params))
+device = torch.device('cuda' if model_conf['cuda'] else 'cpu')
 
-        # format_str = '{{:<{0}s}}\t{{}}'.format(
-        #     max([len(v.name) for v in tf.trainable_variables()]))
-        # for v in tf.trainable_variables():
-        #   tf.logging.info(format_str.format(v.name, v.get_shape()))
+###############################################################################
+# Load data
+###############################################################################
+corpus = get_corpus(model_conf['data_dir'], model_conf['dataset'])
+ntokens = len(corpus.vocab)
+model_conf['n_token'] = ntokens
 
-        if is_training:
-          all_vars = tf.trainable_variables()
-          grads = tf.gradients(loss, all_vars)
-          grads_and_vars = list(zip(grads, all_vars))
+eval_batch_size = 10
+tr_iter = corpus.get_iterator('train', model_conf['batch_size'], model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
+va_iter = corpus.get_iterator('valid', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
+te_iter = corpus.get_iterator('test', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
 
-          return loss, new_mems, grads_and_vars
+###############################################################################
+# Build the model
+###############################################################################
+def init_weight(weight):
+    if model_conf['init'] == 'uniform':
+        nn.init.uniform_(weight, -model_conf['init_range'], model_conf['init_range'])
+    elif model_conf['init'] == 'normal':
+        nn.init.normal_(weight, 0.0, model_conf['init_std'])
+
+def init_bias(bias):
+    nn.init.constant_(bias, 0.0)
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Linear') != -1:
+        if hasattr(m, 'weight') and m.weight is not None:
+            init_weight(m.weight)
+        if hasattr(m, 'bias') and m.bias is not None:
+            init_bias(m.bias)
+    elif classname.find('AdaptiveEmbedding') != -1:
+        if hasattr(m, 'emb_projs'):
+            for i in range(len(m.emb_projs)):
+                if m.emb_projs[i] is not None:
+                    nn.init.normal_(m.emb_projs[i], 0.0, model_conf['proj_init_std'])
+    elif classname.find('Embedding') != -1:
+        if hasattr(m, 'weight'):
+            init_weight(m.weight)
+    elif classname.find('ProjectedAdaptiveLogSoftmax') != -1:
+        if hasattr(m, 'cluster_weight') and m.cluster_weight is not None:
+            init_weight(m.cluster_weight)
+        if hasattr(m, 'cluster_bias') and m.cluster_bias is not None:
+            init_bias(m.cluster_bias)
+        if hasattr(m, 'out_projs'):
+            for i in range(len(m.out_projs)):
+                if m.out_projs[i] is not None:
+                    nn.init.normal_(m.out_projs[i], 0.0, model_conf['proj_init_std'])
+    elif classname.find('LayerNorm') != -1:
+        if hasattr(m, 'weight'):
+            nn.init.normal_(m.weight, 1.0, model_conf['init_std'])
+        if hasattr(m, 'bias') and m.bias is not None:
+            init_bias(m.bias)
+    elif classname.find('TransformerLM') != -1:
+        if hasattr(m, 'r_emb'):
+            init_weight(m.r_emb)
+        if hasattr(m, 'r_w_bias'):
+            init_weight(m.r_w_bias)
+        if hasattr(m, 'r_r_bias'):
+            init_weight(m.r_r_bias)
+        if hasattr(m, 'r_bias'):
+            init_bias(m.r_bias)
+
+def update_dropout(m):
+    classname = m.__class__.__name__
+    if classname.find('Dropout') != -1:
+        if hasattr(m, 'p'):
+            m.p = model_conf['dropout']
+
+def update_dropatt(m):
+    if hasattr(m, 'dropatt'):
+        m.dropatt.p = model_conf['dropatt']
+
+if model_conf['restart']:
+    with open(os.path.join(model_conf['restart_dir'], 'model.pt'), 'rb') as f:
+        model = torch.load(f)
+    if not model_conf['fp16']:
+        model = model.float()
+    model.apply(update_dropout)
+    model.apply(update_dropatt)
+else:
+    model = MemTransformerLM(ntokens, model_conf['n_layer'], model_conf['n_head'], model_conf['d_model'],
+        model_conf['d_head'], model_conf['d_inner'], model_conf['dropout'], model_conf['dropatt'],
+        tie_weight=model_conf['tied'], d_embed=model_conf['d_embed'], div_val=model_conf['div_val'],
+        tie_projs=tie_projs, pre_lnorm=model_conf['pre_lnorm'], tgt_len=model_conf['tgt_len'],
+        ext_len=model_conf['ext_len'], mem_len=model_conf['mem_len'], cutoffs=cutoffs,
+        same_length=model_conf['same_length'], attn_type=model_conf['attn_type'],
+        clamp_len=model_conf['clamp_len'], sample_softmax=model_conf['sample_softmax'])
+    model.apply(weights_init)
+    model.word_emb.apply(weights_init) # ensure embedding init is not overridden by out_layer in case of weight sharing
+model_conf['n_all_param'] = sum([p.nelement() for p in model.parameters()])
+model_conf['n_nonemb_param'] = sum([p.nelement() for p in model.layers.parameters()])
+
+if model_conf['fp16']:
+    model = model.half()
+
+if model_conf['multi_gpu']:
+    model = model.to(device)
+    if model_conf['gpu0_bsz'] >= 0:
+        para_model = BalancedDataParallel(model_conf['gpu0_bsz'] // model_conf['batch_chunk'],
+                                          model, dim=1).to(device)
+    else:
+        para_model = nn.DataParallel(model, dim=1).to(device)
+else:
+    para_model = model.to(device)
+
+#### optimizer
+if model_conf['optim'].lower() == 'sgd':
+    if model_conf['sample_softmax'] > 0:
+        dense_params, sparse_params = [], []
+        for param in model.parameters():
+            if param.size() == model.word_emb.weight.size():
+                sparse_params.append(param)
+            else:
+                dense_params.append(param)
+        optimizer_sparse = optim.SGD(sparse_params, lr=model_conf['lr'] * 2)
+        optimizer = optim.SGD(dense_params, lr=model_conf['lr'], momentum=model_conf['mom'])
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=model_conf['lr'],
+            momentum=model_conf['mom'])
+elif model_conf['optim'].lower() == 'adam':
+    if model_conf['sample_softmax'] > 0:
+        dense_params, sparse_params = [], []
+        for param in model.parameters():
+            if param.size() == model.word_emb.weight.size():
+                sparse_params.append(param)
+            else:
+                dense_params.append(param)
+        optimizer_sparse = optim.SparseAdam(sparse_params, lr=model_conf['lr'])
+        optimizer = optim.Adam(dense_params, lr=model_conf['lr'])
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=model_conf['lr'])
+elif model_conf['optim'].lower() == 'adagrad':
+    optimizer = optim.Adagrad(model.parameters(), lr=model_conf['lr'])
+
+#### scheduler
+if model_conf['scheduler'] == 'cosine':
+    # here we do not set eta_min to lr_min to be backward compatible
+    # because in previous versions eta_min is default to 0
+    # rather than the default value of lr_min 1e-6
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
+        model_conf['max_step'], eta_min=model_conf['eta_min']) # should use eta_min arg
+    if model_conf['sample_softmax'] > 0:
+        scheduler_sparse = optim.lr_scheduler.CosineAnnealingLR(optimizer_sparse,
+            model_conf['max_step'], eta_min=model_conf['eta_min']) # should use eta_min arg
+elif model_conf['scheduler'] == 'inv_sqrt':
+    # originally used for Transformer (in Attention is all you need)
+    def lr_lambda(step):
+        # return a multiplier instead of a learning rate
+        if step == 0 and model_conf['warmup_steps'] == 0:
+            return 1.
         else:
-          return loss, new_mems
+            return 1. / (step ** 0.5) if step > model_conf['warmup_steps'] \
+                   else step / (model_conf['warmup_steps'] ** 1.5)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+elif model_conf['scheduler'] == 'dev_perf':
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+        factor=model_conf['decay_rate'], patience=model_conf['patience'], min_lr=model_conf['lr_min'])
+    if model_conf['sample_softmax'] > 0:
+        scheduler_sparse = optim.lr_scheduler.ReduceLROnPlateau(optimizer_sparse,
+            factor=model_conf['decay_rate'], patience=model_conf['patience'], min_lr=model_conf['lr_min'])
+elif model_conf['scheduler'] == 'constant':
+    pass
 
-    return model_fn
+if model_conf['cuda'] and model_conf['fp16']:
+    # If model_conf['dynamic_loss_scale'] is False, static_loss_scale will be used.
+    # If model_conf['dynamic_loss_scale'] is True, it will take precedence over static_loss_scale.
+    optimizer = FP16_Optimizer(optimizer,
+                               static_loss_scale = model_conf['static_loss_scale'],
+                               dynamic_loss_scale = model_conf['dynamic_loss_scale'],
+                               dynamic_loss_args = {'init_scale': 2 ** 16})
 
-
-def single_core_graph(n_token, cutoffs, is_training, inp, tgt, mems, conf):
-    model_fn = get_model_fn(
-        n_token=n_token,
-        cutoffs=cutoffs,
-        conf=conf)
-
-    model_ret = model_fn(
-        inp=inp,
-        tgt=tgt,
-        mems=mems,
-        is_training=is_training,
-        conf=conf)
-
-    return model_ret
-
-
-def train(n_token, cutoffs, ps_device, conf):
-    ##### Get input function and model function
-    train_input_fn, train_record_info = bumblebeat.data.get_input_fn(
-        record_info_dir=conf['record_info_dir'],
-        split="train",
-        per_host_bsz=conf['train_batch_size'],
-        tgt_len=conf['tgt_len'],
-        num_core_per_host=conf['num_core_per_host'],
-        num_hosts=1,
-        use_tpu=False)
-
-    tf.logging.info("num of batches {}".format(train_record_info["num_batch"]))
-
-    ##### Create computational graph
-    train_set = train_input_fn({
-        "batch_size": conf['train_batch_size'],
-        "data_dir": conf['data_dir']})
-
-    input_feed, label_feed = train_set.make_one_shot_iterator().get_next()
-
-    inputs = tf.split(input_feed, conf['num_core_per_host'], 0)
-    labels = tf.split(label_feed, conf['num_core_per_host'], 0)
-
-    per_core_bsz = conf['train_batch_size'] // conf['num_core_per_host']
-
-    tower_mems, tower_losses, tower_new_mems, tower_grads_and_vars = [], [], [], []
-
-    for i in range(conf['num_core_per_host']):
-      reuse = True if i > 0 else None
-      with tf.device(assign_to_gpu(i, ps_device)), \
-          tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
-
-        mems_i = [tf.placeholder(tf.float32,
-                                 [conf['mem_len'], per_core_bsz, conf['d_model']])
-                  for _ in range(conf['n_layer'])]
-
-        loss_i, new_mems_i, grads_and_vars_i = single_core_graph(
-            n_token=n_token,
-            cutoffs=cutoffs,
-            is_training=True,
-            inp=inputs[i],
-            tgt=labels[i],
-            mems=mems_i,
-            conf=conf)
-
-        tower_mems.append(mems_i)
-        tower_losses.append(loss_i)
-        tower_new_mems.append(new_mems_i)
-        tower_grads_and_vars.append(grads_and_vars_i)
-
-    ## average losses and gradients across towers
-    if len(tower_losses) > 1:
-      loss = tf.add_n(tower_losses) / len(tower_losses)
-      grads_and_vars = average_grads_and_vars(tower_grads_and_vars)
+if model_conf['restart']:
+    if os.path.exists(os.path.join(model_conf['restart_dir'], 'optimizer.pt')):
+        with open(os.path.join(model_conf['restart_dir'], 'optimizer.pt'), 'rb') as f:
+            opt_state_dict = torch.load(f)
+            optimizer.load_state_dict(opt_state_dict)
     else:
-      loss = tower_losses[0]
-      grads_and_vars = tower_grads_and_vars[0]
-    grads, all_vars = zip(*grads_and_vars)
+        print('Optimizer was not saved. Start from scratch.')
 
-    ## clip gradient
-    clipped, gnorm = tf.clip_by_global_norm(grads, conf['clip'])
-    grads_and_vars = list(zip(clipped, all_vars))
+logging('=' * 100)
+for k, v in model_conf['__dict__'].items():
+    logging('    - {} : {}'.format(k, v))
+logging('=' * 100)
+logging('#params = {}'.format(model_conf['n_all_param']))
+logging('#non emb params = {}'.format(model_conf['n_nonemb_param']))
 
-    ## configure the optimizer
-    global_step = tf.train.get_or_create_global_step()
+###############################################################################
+# Training code
+###############################################################################
 
-    # warmup stage: increase the learning rate linearly
-    if conf['warmup_steps'] > 0:
-      warmup_lr = tf.to_float(global_step) / tf.to_float(conf['warmup_steps']) \
-                  * conf['learning_rate']
+def evaluate(eval_iter):
+    # Turn on evaluation mode which disables dropout.
+    model.eval()
+
+    # If the model does not use memory at all, make the ext_len longer.
+    # Otherwise, make the mem_len longer and keep the ext_len the same.
+    if model_conf['mem_len'] == 0:
+        model.reset_length(model_conf['eval_tgt_len'],
+            model_conf['ext_len']+model_conf['tgt_len']-model_conf['eval_tgt_len'], model_conf['mem_len'])
     else:
-      warmup_lr = 0.0
+        model.reset_length(model_conf['eval_tgt_len'],
+            model_conf['ext_len'], model_conf['mem_len']+model_conf['tgt_len']-model_conf['eval_tgt_len'])
 
-    # decay stage: decay the learning rate using the cosine schedule
-    decay_lr = tf.train.cosine_decay(
-        conf['learning_rate'],
-        global_step=global_step-conf['warmup_steps'],
-        decay_steps=conf['train_steps']-conf['warmup_steps'],
-        alpha=conf['min_lr_ratio'])
+    # Evaluation
+    total_len, total_loss = 0, 0.
+    with torch.no_grad():
+        mems = tuple()
+        for i, (data, target, seq_len) in enumerate(eval_iter):
+            if model_conf['max_eval_steps'] > 0 and i >= model_conf['max_eval_steps']:
+                break
+            ret = model(data, target, *mems)
+            loss, mems = ret[0], ret[1:]
+            loss = loss.mean()
+            total_loss += seq_len * loss.float().item()
+            total_len += seq_len
 
-    # choose warmup or decay
-    learning_rate = tf.where(global_step < conf['warmup_steps'],
-                             warmup_lr, decay_lr)
+    # Switch back to the training mode
+    model.reset_length(model_conf['tgt_len'], model_conf['ext_len'], model_conf['mem_len'])
+    model.train()
 
-    # get the train op
-    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-    train_op = optimizer.apply_gradients(grads_and_vars, global_step)
-
-    ##### Training loop
-    tower_mems_np = [
-        [np.zeros([conf['mem_len'], per_core_bsz, conf['d_model']], dtype=np.float32)
-            for layer in range(conf['n_layer'])]
-        for core in range(conf['num_core_per_host'])
-    ]
-
-    saver = tf.train.Saver()
-
-    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
-      sess.run(tf.global_variables_initializer())
-
-      if conf['warm_start_path'] is not None:
-        tf.logging.info("warm start from {}".format(conf['warm_start_path']))
-        saver.restore(sess, conf['warm_start_path'])
-
-      fetches = [loss, tower_new_mems, global_step, gnorm, learning_rate, train_op]
-
-      total_loss, prev_step = 0., -1
-      while True:
-        feed_dict = {}
-        for i in range(conf['num_core_per_host']):
-          for m, m_np in zip(tower_mems[i], tower_mems_np[i]):
-            feed_dict[m] = m_np
-
-        fetched = sess.run(fetches, feed_dict=feed_dict)
-
-        loss_np, tower_mems_np, curr_step = fetched[:3]
-        total_loss += loss_np
-
-        if curr_step > 0 and curr_step % conf['iterations'] == 0:
-          curr_loss = total_loss / (curr_step - prev_step)
-          tf.logging.info("[{}] | gnorm {:.2f} lr {:8.6f} "
-              "| loss {:.2f} | pplx {:>7.2f}, bpc {:>7.4f}".format(
-              curr_step, fetched[-3], fetched[-2],
-              curr_loss, math.exp(curr_loss), curr_loss / math.log(2)))
-          total_loss, prev_step = 0., curr_step
-
-        if curr_step > 0 and curr_step % conf['save_steps'] == 0:
-          save_path = os.path.join(conf['model_dir'], "model.ckpt")
-          bumblebeat.utils.create_dir_if_not_exists(save_path)
-          saver.save(sess, save_path)
-          tf.logging.info("Model saved in path: {}".format(save_path))
-
-        if curr_step == conf['train_steps']:
-          break
+    return total_loss / total_len
 
 
-def evaluate(n_token, cutoffs, ps_device, conf):
-    ##### Get input function and model function
-    eval_input_fn, eval_record_info = bumblebeat.data.get_input_fn(
-        record_info_dir=conf['record_info_dir'],
-        split=conf['eval_split'],
-        per_host_bsz=conf['eval_batch_size'],
-        tgt_len=conf['tgt_len'],
-        num_core_per_host=conf['num_core_per_host'],
-        num_hosts=1,
-        use_tpu=False)
-
-    num_batch = eval_record_info["num_batch"]
-    if conf['max_eval_batch'] > 0:
-        num_batch = conf['max_eval_batch']
-    tf.logging.info("num of batches {}".format(num_batch))
-
-    ##### Create computational graph
-    eval_set = eval_input_fn({
-        "batch_size": conf['eval_batch_size'],
-        "data_dir": conf['data_dir']})
-
-    input_feed, label_feed = eval_set.make_one_shot_iterator().get_next()
-
-    inputs = tf.split(input_feed, conf['num_core_per_host'], 0)
-    labels = tf.split(label_feed, conf['num_core_per_host'], 0)
-
-    per_core_bsz = conf['eval_batch_size'] // conf['num_core_per_host']
-    tower_mems, tower_losses, tower_new_mems = [], [], []
-
-    for i in range(conf['num_core_per_host']):
-      with tf.device(assign_to_gpu(i, ps_device)), \
-          tf.variable_scope(tf.get_variable_scope(), reuse=tf.AUTO_REUSE):
-
-        mems_i = [tf.placeholder(tf.float32,
-                      [conf['mem_len'], per_core_bsz, conf['d_model']])
-                  for _ in range(conf['n_layer'])]
-
-        loss_i, new_mems_i = single_core_graph(
-            n_token=n_token,
-            cutoffs=cutoffs,
-            is_training=False,
-            inp=inputs[i],
-            tgt=labels[i],
-            mems=mems_i,
-            conf=conf)
-
-        tower_mems.append(mems_i)
-        tower_losses.append(loss_i)
-        tower_new_mems.append(new_mems_i)
-
-    ## sum losses across towers
-    if len(tower_losses) > 1:
-      loss = tf.add_n(tower_losses) / len(tower_losses)
+def train():
+    # Turn on training mode which enables dropout.
+    global train_step, train_loss, best_val_loss, eval_start_time, log_start_time
+    model.train()
+    if model_conf['batch_chunk'] > 1:
+        mems = [tuple() for _ in range(model_conf['batch_chunk'])]
     else:
-      loss = tower_losses[0]
+        mems = tuple()
+    train_iter = tr_iter.get_varlen_iter() if model_conf['varlen'] else tr_iter
+    for batch, (data, target, seq_len) in enumerate(train_iter):
+        model.zero_grad()
+        if model_conf['batch_chunk'] > 1:
+            data_chunks = torch.chunk(data, model_conf['batch_chunk'], 1)
+            target_chunks = torch.chunk(target, model_conf['batch_chunk'], 1)
+            for i in range(model_conf['batch_chunk']):
+                data_i = data_chunks[i].contiguous()
+                target_i = target_chunks[i].contiguous()
+                ret = para_model(data_i, target_i, *mems[i])
+                loss, mems[i] = ret[0], ret[1:]
+                loss = loss.float().mean().type_as(loss) / model_conf['batch_chunk']
+                if model_conf['fp16']:
+                    optimizer.backward(loss)
+                else:
+                    loss.backward()
+                train_loss += loss.float().item()
+        else:
+            ret = para_model(data, target, *mems)
+            loss, mems = ret[0], ret[1:]
+            loss = loss.float().mean().type_as(loss)
+            if model_conf['fp16']:
+                optimizer.backward(loss)
+            else:
+                loss.backward()
+            train_loss += loss.float().item()
 
-    ##### Evaluation loop
-    tower_mems_np = [
-        [np.zeros([conf['mem_len'], per_core_bsz, conf['d_model']], dtype=np.float32)
-            for layer in range(conf['n_layer'])]
-        for core in range(conf['num_core_per_host'])
-    ]
+        if model_conf['fp16']:
+            optimizer.clip_master_grads(model_conf['clip'])
+        else:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), model_conf['clip'])
 
-    saver = tf.train.Saver()
+        optimizer.step()
+        if model_conf['sample_softmax'] > 0:
+            optimizer_sparse.step()
 
-    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
-      sess.run(tf.global_variables_initializer())
+        # step-wise learning rate annealing
+        train_step += 1
+        if model_conf['scheduler'] in ['cosine', 'constant', 'dev_perf']:
+            # linear warmup stage
+            if train_step < model_conf['warmup_steps']:
+                curr_lr = model_conf['lr'] * train_step / model_conf['warmup_steps']
+                optimizer.param_groups[0]['lr'] = curr_lr
+                if model_conf['sample_softmax'] > 0:
+                    optimizer_sparse.param_groups[0]['lr'] = curr_lr * 2
+            else:
+                if model_conf['scheduler'] == 'cosine':
+                    scheduler.step(train_step)
+                    if model_conf['sample_softmax'] > 0:
+                        scheduler_sparse.step(train_step)
+        elif model_conf['scheduler'] == 'inv_sqrt':
+            scheduler.step(train_step)
 
-      if conf['eval_ckpt_path'] is None:
-        eval_ckpt_path = tf.train.latest_checkpoint(conf['model_dir'])
-      else:
-        eval_ckpt_path = conf['eval_ckpt_path']
-      tf.logging.info("Evaluate {}".format(eval_ckpt_path))
-      saver.restore(sess, eval_ckpt_path)
+        if train_step % model_conf['log_interval'] == 0:
+            cur_loss = train_loss / model_conf['log_interval']
+            elapsed = time.time() - log_start_time
+            log_str = '| epoch {:3d} step {:>8d} | {:>6d} batches | lr {:.3g} ' \
+                      '| ms/batch {:5.2f} | loss {:5.2f}'.format(
+                epoch, train_step, batch+1, optimizer.param_groups[0]['lr'],
+                elapsed * 1000 / model_conf['log_interval'], cur_loss)
+            if model_conf['dataset'] in ['enwik8', 'text8']:
+                log_str += ' | bpc {:9.5f}'.format(cur_loss / math.log(2))
+            else:
+                log_str += ' | ppl {:9.3f}'.format(math.exp(cur_loss))
+            logging(log_str)
+            train_loss = 0
+            log_start_time = time.time()
 
-      fetches = [loss, tower_new_mems, tf.size(label_feed)]
+        if train_step == 1 or train_step % model_conf['eval_interval'] == 0:
+            val_loss = evaluate(va_iter)
+            logging('-' * 100)
+            log_str = '| Eval {:3d} at step {:>8d} | time: {:5.2f}s ' \
+                      '| valid loss {:5.2f}'.format(
+                train_step // model_conf['eval_interval'], train_step,
+                (time.time() - eval_start_time), val_loss)
+            if model_conf['dataset'] in ['enwik8', 'text8']:
+                log_str += ' | bpc {:9.5f}'.format(val_loss / math.log(2))
+            else:
+                log_str += ' | valid ppl {:9.3f}'.format(math.exp(val_loss))
+            logging(log_str)
+            logging('-' * 100)
+            # Save the model if the validation loss is the best we've seen so far.
+            if not best_val_loss or val_loss < best_val_loss:
+                if not model_conf['debug']:
+                    with open(os.path.join(model_conf['work_dir'], 'model.pt'), 'wb') as f:
+                        torch.save(model, f)
+                    with open(os.path.join(model_conf['work_dir'], 'optimizer.pt'), 'wb') as f:
+                        torch.save(optimizer.state_dict(), f)
+                best_val_loss = val_loss
 
-      format_str = "  >> processing batch {{:{0}d}}/{{:{0}d}} ..".format(
-          len(str(num_batch)))
+            # dev-performance based learning rate annealing
+            if model_conf['scheduler'] == 'dev_perf':
+                scheduler.step(val_loss)
+                if model_conf['sample_softmax'] > 0:
+                    scheduler_sparse.step(val_loss)
 
-      total_loss, total_cnt = 0, 0
-      for step in range(num_batch):
-        if step % (num_batch // 10) == 0:
-          tf.logging.info(format_str.format(step, num_batch))
+            eval_start_time = time.time()
 
-        feed_dict = {}
-        for i in range(conf['num_core_per_host']):
-          for m, m_np in zip(tower_mems[i], tower_mems_np[i]):
-            feed_dict[m] = m_np
+        if train_step == model_conf['max_step']:
+            break
 
-        fetched = sess.run(fetches, feed_dict=feed_dict)
+# Loop over epochs.
+train_step = 0
+train_loss = 0
+best_val_loss = None
 
-        loss_np, tower_mems_np, cnt_np = fetched[:3]
-        total_loss += loss_np * cnt_np
-        total_cnt += cnt_np
+log_start_time = time.time()
+eval_start_time = time.time()
 
-      avg_loss = total_loss / total_cnt
-      tf.logging.info("| loss {:.2f} | pplx {:>7.2f}, bpc {:>7.4f}".format(
-          avg_loss, math.exp(avg_loss), avg_loss / math.log(2)))
+# At any point you can hit Ctrl + C to break out of training early.
+try:
+    for epoch in itertools.count(start=1):
+        train()
+        if train_step == model_conf['max_step']:
+            logging('-' * 100)
+            logging('End of training')
+            break
+except KeyboardInterrupt:
+    logging('-' * 100)
+    logging('Exiting from training early')
 
+# Load the best saved model.
+with open(os.path.join(model_conf['work_dir'], 'model.pt'), 'rb') as f:
+    model = torch.load(f)
+para_model = model.to(device)
 
-def model_main(conf):
-    """
-    Train model on dataset using parameters specified
-    in <conf>. Requires that the data step has ran successfully
-    and TF Records are available.
-    """
-    model_conf = conf['model']
-    tf.logging.set_verbosity(tf.logging.INFO)
-
-    # Get corpus info
-    corpus_info = bumblebeat.data.get_corpus_info(model_conf['corpus_info_path'])
-    n_token = corpus_info["vocab_size"]
-    cutoffs = corpus_info["cutoffs"][1:-1]
-    tf.logging.info("n_token {}".format(n_token))
-
-    if model_conf['do_train']:
-        train(n_token, cutoffs, "/gpu:0", model_conf)
-    if model_conf['do_eval']:
-        evaluate(n_token, cutoffs, "/gpu:0", model_conf)
+# Run on test data.
+test_loss = evaluate(te_iter)
+logging('=' * 100)
+logging('| End of training | test loss {:5.2f} | test ppl {:9.3f}'.format(test_loss, math.exp(test_loss)))
+logging('=' * 100)

@@ -1,6 +1,9 @@
 data_root: 'data/' # Directory ot store data
-batch_size: &batch_size 6 # Number of batches to split data into
-tgt_len: &tgt_len 512 # Number of steps to predict
+batch_size: &batch_size 60 # Number of batches to split data into
+tgt_len: &tgt_len 70 # Number of steps to predict
+eval_tgt_len: 50 # number of tokens to predict for evaluation
+seed: 
+
 
 data:
     data_dir: 'data/'
@@ -19,6 +22,10 @@ processing:
 model:
     ## GPU ##
     num_core_per_host: 3 # Number of cores to use, should be a divisor of batch size
+    cuda: False
+    multi_gpu: True # Use multiple GPUs
+    gpu0_bsz: -1 # Batch size on gpu 0
+
 
     ## Experiment (data/checkpoint/directory) ##
     data_dir: "data/groove/full-midionly/tfrecords" # Where to find tfrecords of training data
@@ -31,13 +38,22 @@ model:
     warm_start_path: # Checkpoint path for warm start. If set, will clear Adam states. Note that the new model_dir should be different from warm_start_path
     
     ## Optimization ##
+    optim: 'adam' # Which optimizer to use
     learning_rate: 0.00025 # Maximum learning rate
-    warmup_steps: 0 # Number of steps for linear lr warmup
+    warmup_step: 0 # Number of steps for linear lr warmup (upper epoch lmit)
     clip: 0.25 # Gradient clipping value
+    clip_nonemb: True # Only clip the gradient of non-embedding params?
     min_lr_ratio: 0.004 # Minimum ratio learning rate (for cosine decay)
-    
+    mom: 0 # Momentum for SGD 
+    scheduler: 'cosine' # lr scheduler to use
+    decay_rate: 0.5 # Decay factor when ReduceLRonPlateau is used
+    lr_min: 0.0 # Minimum learning rate during annealing
+    eta_min: 0 # Min learning rate for cosine scheduler
+    static-loss-scale: True # improve fp16 convergence?
+    dynamic-loss-scale: True # supersedes static-loss-scale
+
     ## Training ##
-    train_steps: 400000 # Total umber of training steps
+    max_step: 400000 # Upper epoch limit
     train_batch_size: *batch_size # Size of train batch
     eval_batch_size: *batch_size # Size of valid batch
     iterations: 200 # Number of iterations per repeat loop
@@ -45,7 +61,7 @@ model:
 
     ## Evaluation config ##
     do_test: False # Run on the test set
-    max_eval_batch: -1 # Set -1 to turn off. Only used in test mode
+    max_eval_steps: -1 # Set -1 to turn off. Only used in test mode
     do_eval_only: False # Run evaluation only
     start_eval_steps: 10000 # Which checkpoint to start with in `do_eval_only` mode
     eval_split: "valid" # Which data split to evaluate
@@ -63,16 +79,39 @@ model:
     d_inner: 2048 # Dimension of inner hidden size in positionwise feed-forward
     dropout: 0.2 # Dropout rate
     dropatt: 0.1 # Attention dropout rate
-    untie_r: False # untie r_w_bias and r_r_bias?
+    not_tied: True # untie r_w_bias and r_r_bias?
+    pre_lnorm: True # Apply LayerNorm to the input instead of the output
+    varlen: True # Use variable Length
+    attn_type: 0 # Attention type. 0 for ours, 1 for Shaw et al, 2 for Vaswani et al, 3 for Al Rfou et al.
+    ext_len: 0 # Legnth of the extended context
+    batch_chunk: 1 # Split batch into chunks to save memory
  
     ## Adaptive Softmax / Embedding ##
+    adaptive: True
     tie_weight: True  # Tie embedding and softmax weight.
     div_val: 1  # Divide the embedding size by this val for each bin
     proj_share_all_but_first: False  # True to share all but first projs, False not to share.
     proj_same_dim: True  # Project the bin with the same dimension.
+    sample_softmax: -1 # Number of samples in sampled softmax
+    patience: 0 # Patience
+    finetune_v2: True 
+    finetune_v3: True
+    fp16: True # Run in pseudo-fp16 mode (fp16 storage fp32 math).
 
     ## Parameter Initialization ##
     init: "normal"  # ["normal", "uniform"],
     init_std: 0.02  # Initialization std when init is normal.
     proj_init_std: 0.01  # Initialization std for embedding projection.
     init_range: 0.1  # Initialization std when init is uniform.
+    emb_init: "normal" 
+    emb_init_range: 0.01  # Initialization std when init is uniform.
+
+    log_interval: 200 # Report interval
+    eval_interval: 4000 # Evaluation interval
+    work_dir: 'LM-TFM' # Experiment Directory
+    restart: True # Restart training fromn the saved checkpoint?
+    restart_dir: '' # Restart directory
+    debug: True # Run in debug mode (do not create exp dir)
+
+
+
