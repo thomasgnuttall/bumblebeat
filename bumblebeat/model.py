@@ -49,14 +49,16 @@ if model_conf['fp16']:
             print('WARNING: apex not installed, ignoring --fp16 option')
             model_conf['fp16'] = False
 
-device = torch.device('cuda' if model_conf['cuda'] else 'cpu')
+device = torch.device('cuda') if model_conf['cuda'] else 'cpu')
 
 ###############################################################################
 # Load data
 ###############################################################################
-corpus = get_corpus(data_conf['data_dir'], data_conf['dataset'], pitch_classes, time_steps_vocab, conf['processing'])
+corpus = get_corpus(data_conf['dataset'], data_conf['data_dir'], pitch_classes, time_steps_vocab, conf['processing'])
 ntokens = len(corpus.vocab)
 model_conf['n_token'] = ntokens
+
+cutoffs, tie_projs = [], [False]
 
 eval_batch_size = 10
 tr_iter = corpus.get_iterator('train', model_conf['train_batch_size'], model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
@@ -134,7 +136,7 @@ if model_conf['restart']:
 else:
     model = MemTransformerLM(ntokens, model_conf['n_layer'], model_conf['n_head'], model_conf['d_model'],
         model_conf['d_head'], model_conf['d_inner'], model_conf['dropout'], model_conf['dropatt'],
-        tie_weight=model_conf['tied'], d_embed=model_conf['d_embed'], div_val=model_conf['div_val'],
+        tie_weight=model_conf['not_tied'], d_embed=model_conf['d_embed'], div_val=model_conf['div_val'],
         tie_projs=tie_projs, pre_lnorm=model_conf['pre_lnorm'], tgt_len=model_conf['tgt_len'],
         ext_len=model_conf['ext_len'], mem_len=model_conf['mem_len'], cutoffs=cutoffs,
         same_length=model_conf['same_length'], attn_type=model_conf['attn_type'],
@@ -166,10 +168,10 @@ if model_conf['optim'].lower() == 'sgd':
                 sparse_params.append(param)
             else:
                 dense_params.append(param)
-        optimizer_sparse = optim.SGD(sparse_params, lr=model_conf['lr'] * 2)
-        optimizer = optim.SGD(dense_params, lr=model_conf['lr'], momentum=model_conf['mom'])
+        optimizer_sparse = optim.SGD(sparse_params, lr=model_conf['learning_rate'] * 2)
+        optimizer = optim.SGD(dense_params, lr=model_conf['learning_rate'], momentum=model_conf['mom'])
     else:
-        optimizer = optim.SGD(model.parameters(), lr=model_conf['lr'],
+        optimizer = optim.SGD(model.parameters(), lr=model_conf['learning_rate'],
             momentum=model_conf['mom'])
 elif model_conf['optim'].lower() == 'adam':
     if model_conf['sample_softmax'] > 0:
@@ -179,12 +181,12 @@ elif model_conf['optim'].lower() == 'adam':
                 sparse_params.append(param)
             else:
                 dense_params.append(param)
-        optimizer_sparse = optim.SparseAdam(sparse_params, lr=model_conf['lr'])
-        optimizer = optim.Adam(dense_params, lr=model_conf['lr'])
+        optimizer_sparse = optim.SparseAdam(sparse_params, lr=model_conf['learning_rate'])
+        optimizer = optim.Adam(dense_params, lr=model_conf['learning_rate'])
     else:
-        optimizer = optim.Adam(model.parameters(), lr=model_conf['lr'])
+        optimizer = optim.Adam(model.parameters(), lr=model_conf['learning_rate'])
 elif model_conf['optim'].lower() == 'adagrad':
-    optimizer = optim.Adagrad(model.parameters(), lr=model_conf['lr'])
+    optimizer = optim.Adagrad(model.parameters(), lr=model_conf['learning_rate'])
 
 #### scheduler
 if model_conf['scheduler'] == 'cosine':
@@ -232,7 +234,7 @@ if model_conf['restart']:
         print('Optimizer was not saved. Start from scratch.')
 
 logging('=' * 100)
-for k, v in model_conf['__dict__'].items():
+for k, v in model_conf.items():
     logging('    - {} : {}'.format(k, v))
 logging('=' * 100)
 logging('#params = {}'.format(model_conf['n_all_param']))
@@ -324,10 +326,10 @@ def train():
         if model_conf['scheduler'] in ['cosine', 'constant', 'dev_perf']:
             # linear warmup stage
             if train_step < model_conf['warmup_steps']:
-                curr_lr = model_conf['lr'] * train_step / model_conf['warmup_steps']
-                optimizer.param_groups[0]['lr'] = curr_lr
+                curr_lr = model_conf['learning_rate'] * train_step / model_conf['warmup_steps']
+                optimizer.param_groups[0]['learning_rate'] = curr_lr
                 if model_conf['sample_softmax'] > 0:
-                    optimizer_sparse.param_groups[0]['lr'] = curr_lr * 2
+                    optimizer_sparse.param_groups[0]['learning_rate'] = curr_lr * 2
             else:
                 if model_conf['scheduler'] == 'cosine':
                     scheduler.step(train_step)
@@ -341,7 +343,7 @@ def train():
             elapsed = time.time() - log_start_time
             log_str = '| epoch {:3d} step {:>8d} | {:>6d} batches | lr {:.3g} ' \
                       '| ms/batch {:5.2f} | loss {:5.2f}'.format(
-                epoch, train_step, batch+1, optimizer.param_groups[0]['lr'],
+                epoch, train_step, batch+1, optimizer.param_groups[0]['learning_rate'],
                 elapsed * 1000 / model_conf['log_interval'], cur_loss)
             if model_conf['dataset'] in ['enwik8', 'text8']:
                 log_str += ' | bpc {:9.5f}'.format(cur_loss / math.log(2))

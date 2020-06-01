@@ -164,6 +164,34 @@ class LMShuffledIterator(object):
             if n_retain > 0:
                 data[:n_retain] = data[-n_retain:]
             data.resize_(n_retain + self.bptt, data.size(1))
+    
+    def get_batch(self, i, bptt=None):
+        if bptt is None: bptt = self.bptt
+        seq_len = min(bptt, self.data.size(0) - 1 - i)
+
+        end_idx = i + seq_len
+        beg_idx = max(0, i - self.ext_len)
+
+        data = self.data[beg_idx:end_idx]
+        target = self.data[i+1:i+1+seq_len]
+
+        return data, target, seq_len
+
+    def get_fixlen_iter(self, start=0):
+        for i in range(start, self.data.size(0) - 1, self.bptt):
+            yield self.get_batch(i)
+
+    def get_varlen_iter(self, start=0, std=5, min_len=5, max_deviation=3):
+        max_len = self.bptt + max_deviation * std
+        i = start
+        while True:
+            bptt = self.bptt if np.random.random() < 0.95 else self.bptt / 2.
+            bptt = min(max_len, max(min_len, int(np.random.normal(bptt, std))))
+            data, target, seq_len = self.get_batch(i, bptt)
+            i += seq_len
+            yield data, target, seq_len
+            if i >= self.data.size(0) - 2:
+                break
 
     def __iter__(self):
         # sent_stream is an iterator
