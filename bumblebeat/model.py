@@ -21,16 +21,16 @@ if model_conf['d_embed'] < 0:
     model_conf['d_embed'] = model_conf['d_model']
     
 assert model_conf['ext_len'] >= 0, 'extended context length must be non-negative'
-assert model_conf['batch_size'] % model_conf['batch_chunk'] == 0
+assert model_conf['train_batch_size'] % model_conf['batch_chunk'] == 0
 
-model_conf['work_dir'] = '{}-{}'.format(model_conf['work_dir'], model_conf['dataset'])
+model_conf['work_dir'] = '{}-{}'.format(model_conf['work_dir'], data_conf['dataset'])
 model_conf['work_dir'] = os.path.join(model_conf['work_dir'], time.strftime('%Y%m%d-%H%M%S'))
 logging = create_exp_dir(model_conf['work_dir'],
     scripts_to_save=['train.py', 'mem_transformer.py'], debug=model_conf['debug'])
 
 # Set the random seed manually for reproducibility.
-np.random.seed(model_conf['seed'])
-torch.manual_seed(model_conf['seed'])
+#np.random.seed(model_conf['seed'])
+#torch.manual_seed(model_conf['seed'])
 if torch.cuda.is_available():
     if not model_conf['cuda']:
         print('WARNING: You have a CUDA device, so you should probably run with --cuda')
@@ -54,12 +54,12 @@ device = torch.device('cuda' if model_conf['cuda'] else 'cpu')
 ###############################################################################
 # Load data
 ###############################################################################
-corpus = get_corpus(model_conf['data_dir'], model_conf['dataset'])
+corpus = get_corpus(data_conf['data_dir'], data_conf['dataset'], pitch_classes, time_steps_vocab, conf['processing'])
 ntokens = len(corpus.vocab)
 model_conf['n_token'] = ntokens
 
 eval_batch_size = 10
-tr_iter = corpus.get_iterator('train', model_conf['batch_size'], model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
+tr_iter = corpus.get_iterator('train', model_conf['train_batch_size'], model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
 va_iter = corpus.get_iterator('valid', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
 te_iter = corpus.get_iterator('test', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
 

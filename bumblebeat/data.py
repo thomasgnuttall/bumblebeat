@@ -85,7 +85,7 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processi
         with open(fn, "rb") as fp:
             corpus = pickle.load(fp)
     else:
-        bumblebeat.utils.create_dir_if_not_exists(fn)
+        bumblebeat.utils.data.create_dir_if_not_exists(fn)
 
         print("Producing dataset...")
         corpus = Corpus(
@@ -200,7 +200,7 @@ class Corpus:
         self.augment_stretch = True
         self.shuffle = True
 
-        self.velocity_buckets = bumblebeat.utils.split_range(
+        self.velocity_buckets = bumblebeat.utils.data.split_range(
             min_velocity, max_velocity, n_velocity_buckets)
         self.pitch_class_map = self._classes_to_map(self.pitch_classes)
         self.n_instruments = len(set(self.pitch_class_map.values()))
@@ -319,7 +319,7 @@ class Corpus:
         - velocities are bucketted as per self.velocity_buckets
         """
         d = [(self.pitch_class_map[n.pitch], \
-              bumblebeat.utils.get_bucket_number(n.velocity, self.velocity_buckets),
+              bumblebeat.utils.data.get_bucket_number(n.velocity, self.velocity_buckets),
               n.quantized_start_step if quantize else s.start_time) \
                 for n in note_sequence.notes \
                 if n.pitch in self.pitch_class_map]
