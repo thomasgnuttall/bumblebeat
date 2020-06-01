@@ -13,8 +13,8 @@ import torch.optim as optim
 
 from bumblebeat.data import get_corpus
 from bumblebeat.transformer import MemTransformerLM
-from utils.exp_utils import create_exp_dir
-from utils.data_parallel import BalancedDataParallel
+from bumblebeat.utils.exp_utils import create_exp_dir
+from bumblebeat.utils.data_parallel import BalancedDataParallel
 
 
 if model_conf['d_embed'] < 0:
