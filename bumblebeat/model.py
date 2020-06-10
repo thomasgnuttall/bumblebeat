@@ -35,7 +35,8 @@ if torch.cuda.is_available():
     if not model_conf['cuda']:
         print('WARNING: You have a CUDA device, so you should probably run with --cuda')
     else:
-        torch.cuda.manual_seed_all(model_conf['seed'])
+        pass
+        #torch.cuda.manual_seed_all(model_conf['seed'])
 
 # Validate `--fp16` option
 if model_conf['fp16']:
@@ -49,12 +50,18 @@ if model_conf['fp16']:
             print('WARNING: apex not installed, ignoring --fp16 option')
             model_conf['fp16'] = False
 
-device = torch.device('cuda') if model_conf['cuda'] else 'cpu')
+device = torch.device('cuda' if model_conf['cuda'] else 'cpu')
 
 ###############################################################################
 # Load data
 ###############################################################################
-corpus = get_corpus(data_conf['dataset'], data_conf['data_dir'], pitch_classes, time_steps_vocab, conf['processing'])
+corpus = get_corpus(
+    data_conf['dataset'],
+    data_conf['data_dir'],
+    pitch_classes['DEFAULT_DRUM_TYPE_PITCHES'],
+    time_steps_vocab,
+    conf['processing']
+)
 ntokens = len(corpus.vocab)
 model_conf['n_token'] = ntokens
 
@@ -62,8 +69,8 @@ cutoffs, tie_projs = [], [False]
 
 eval_batch_size = 10
 tr_iter = corpus.get_iterator('train', model_conf['train_batch_size'], model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
-va_iter = corpus.get_iterator('valid', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
-te_iter = corpus.get_iterator('test', eval_batch_size, model_conf['eval_tgt_len'], device=device, ext_len=model_conf['ext_len'])
+va_iter = corpus.get_iterator('valid', eval_batch_size, model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
+te_iter = corpus.get_iterator('test', eval_batch_size, model_conf['tgt_len'], device=device, ext_len=model_conf['ext_len'])
 
 ###############################################################################
 # Build the model
@@ -171,8 +178,7 @@ if model_conf['optim'].lower() == 'sgd':
         optimizer_sparse = optim.SGD(sparse_params, lr=model_conf['learning_rate'] * 2)
         optimizer = optim.SGD(dense_params, lr=model_conf['learning_rate'], momentum=model_conf['mom'])
     else:
-        optimizer = optim.SGD(model.parameters(), lr=model_conf['learning_rate'],
-            momentum=model_conf['mom'])
+        optimizer = optim.SGD(model.parameters(), lr=model_conf['learning_rate'],momentum=model_conf['mom'])
 elif model_conf['optim'].lower() == 'adam':
     if model_conf['sample_softmax'] > 0:
         dense_params, sparse_params = [], []

@@ -104,17 +104,27 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processi
 
 
 class LMShuffledIterator(object):
-    def __init__(self, data, bsz, bptt, device='cpu', ext_len=None):
+    def __init__(self, data, bsz, bptt, device='cpu', ext_len=None, shuffle=False):
         """
             data -- list[LongTensor] -- there is no order among the LongTensors
         """
-        self.data = iter(data)
+        self.data = data
 
         self.bsz = bsz
         self.bptt = bptt
         self.ext_len = ext_len if ext_len is not None else 0
 
         self.device = device
+        self.shuffle = shuffle
+
+    def get_sent_stream(self):
+        # index iterator
+        epoch_indices = np.random.permutation(len(self.data)) if self.shuffle \
+            else np.array(range(len(self.data)))
+
+        # sentence iterator
+        for idx in epoch_indices:
+            yield self.data[idx]
 
     def stream_iterator(self, sent_stream):
         # streams for each data in the batch
@@ -164,40 +174,34 @@ class LMShuffledIterator(object):
             if n_retain > 0:
                 data[:n_retain] = data[-n_retain:]
             data.resize_(n_retain + self.bptt, data.size(1))
-    
-    def get_batch(self, i, bptt=None):
-        if bptt is None: bptt = self.bptt
-        seq_len = min(bptt, self.data.size(0) - 1 - i)
-
-        end_idx = i + seq_len
-        beg_idx = max(0, i - self.ext_len)
-
-        data = self.data[beg_idx:end_idx]
-        target = self.data[i+1:i+1+seq_len]
-
-        return data, target, seq_len
-
-    def get_fixlen_iter(self, start=0):
-        for i in range(start, self.data.size(0) - 1, self.bptt):
-            yield self.get_batch(i)
-
-    def get_varlen_iter(self, start=0, std=5, min_len=5, max_deviation=3):
-        max_len = self.bptt + max_deviation * std
-        i = start
-        while True:
-            bptt = self.bptt if np.random.random() < 0.95 else self.bptt / 2.
-            bptt = min(max_len, max(min_len, int(np.random.normal(bptt, std))))
-            data, target, seq_len = self.get_batch(i, bptt)
-            i += seq_len
-            yield data, target, seq_len
-            if i >= self.data.size(0) - 2:
-                break
 
     def __iter__(self):
         # sent_stream is an iterator
-        for batch in self.stream_iterator(self.data):
+        sent_stream = self.get_sent_stream()
+        for batch in self.stream_iterator(sent_stream):
             yield batch
 
+
+class PartitionIterator(LMShuffledIterator):
+    def __init__(self, raw_data, bsz, bptt, device='cpu', ext_len=None, shuffle=False):
+
+        self.raw_data = iter(raw_data)
+
+        self.bsz = bsz
+        self.bptt = bptt
+        self.ext_len = ext_len if ext_len is not None else 0
+
+        self.device = device
+        self.shuffle = shuffle
+
+    def __iter__(self):
+        #if self.shuffle:
+        #    np.random.shuffle(self.paths)
+        # sents is list of tensors
+        #if self.shuffle:
+        #    np.random.shuffle(sents)
+        for batch in self.stream_iterator(iter(self.raw_data)):
+            yield batch
 
 class Corpus:
     """
@@ -207,7 +211,7 @@ class Corpus:
             self, 
             data_dir, 
             dataset_name, 
-            pitch_classes,  
+            pitch_classes,
             time_steps_vocab,
             processing_conf,
             n_velocity_buckets=10,
@@ -303,10 +307,10 @@ class Corpus:
     
     def get_iterator(self, split, *args, **kwargs):
         if split == 'train':
-            data_iter = LMShuffledIterator(self.train, *args, **kwargs)
+            data_iter = PartitionIterator(self.train, *args, **kwargs)
         elif split in ['valid', 'test']:
             data = self.valid if split == 'valid' else self.test
-            data_iter = LMShuffledIterator(data, *args, **kwargs)
+            data_iter = PartitionIterator(data, *args, **kwargs)
 
         return data_iter
 
@@ -435,7 +439,7 @@ class Corpus:
         ======
         num: int
             Number of ticks to convert
-        time_vocab: dict
+        time_vocab: d¡ict
             {num_ticks: token}
 
         Return

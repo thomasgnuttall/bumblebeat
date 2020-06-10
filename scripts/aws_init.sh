@@ -10,7 +10,7 @@ tmux
 #############
 # Virtual Env
 #############
-pip3.7 install virtualenvwrapper
+sudo pip3.7 install virtualenvwrapper
 export WORKON_HOME=~/envs
 export VIRTUALENVWRAPPER_PYTHON='/usr/bin/python3.7'
 mkdir -p $WORKON_HOME
