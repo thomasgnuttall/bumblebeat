@@ -356,10 +356,12 @@ class Corpus:
 
         # note sequence -> [(pitch, vel_bucket, start timestep)]
         tokens = [self._tokenize(d, quantize=quantize) for d in dev_sequences]
+        
+        if self.shuffle:
+            np.random.shuffle(tokens)
+
 
         stream = self._join_token_list(tokens, n=5)
-        #if self.shuffle:
-        #    np.random.shuffle(tokens)
 
         return torch.tensor(stream)
     
@@ -370,7 +372,7 @@ class Corpus:
         of the highest token value (token assigned for placeholding)
         """
         pad = max(self.reverse_vocab.keys())
-        to_join = [tokens+n*[pad] for t in tokens]
+        to_join = [t+n*[pad] for t in tokens]
         return [y for x in to_join for y in x]
 
     def get_iterator(self, split, *args, **kwargs):
