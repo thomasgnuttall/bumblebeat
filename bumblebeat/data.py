@@ -197,13 +197,13 @@ class PartitionIterator(LMShuffledIterator):
     
     def get_batch(self, i, bptt=None):
         if bptt is None: bptt = self.bptt
-        seq_len = min(bptt, self.data.size(0) - 1 - i)
+        seq_len = min(bptt, self.raw_data.size(0) - 1 - i)
 
         end_idx = i + seq_len
         beg_idx = max(0, i - self.ext_len)
 
-        data = self.data[beg_idx:end_idx]
-        target = self.data[i+1:i+1+seq_len]
+        data = self.raw_data[beg_idx:end_idx]
+        target = self.raw_data[i+1:i+1+seq_len]
 
         return data, target, seq_len
 
