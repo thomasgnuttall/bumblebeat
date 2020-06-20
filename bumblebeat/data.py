@@ -216,7 +216,7 @@ class PartitionIterator(LMShuffledIterator):
             data, target, seq_len = self.get_batch(i, bptt)
             i += seq_len
             yield data, target, seq_len
-            if i >= self.data.size(0) - 2:
+            if i >= self.raw_data.size(0) - 2:
                 break
 
     def __iter__(self):
