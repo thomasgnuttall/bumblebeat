@@ -157,7 +157,7 @@ class LMOrderedIterator(object):
     def __iter__(self):
         return self.get_fixlen_iter()
 
-        
+
 
 
 class LMShuffledIterator(object):
@@ -357,11 +357,22 @@ class Corpus:
         # note sequence -> [(pitch, vel_bucket, start timestep)]
         tokens = [self._tokenize(d, quantize=quantize) for d in dev_sequences]
 
-        if self.shuffle:
-            np.random.shuffle(tokens)
+        stream = self._join_token_list(tokens, n=5)
+        #if self.shuffle:
+        #    np.random.shuffle(tokens)
 
-        return tokens
+        return torch.tensor(stream)
     
+    def _join_token_list(self, tokens, n=5):
+        """
+        Join list of lists, <tokens>
+        In new list each previous list is separated by <n> instances
+        of the highest token value (token assigned for placeholding)
+        """
+        pad = max(self.reverse_vocab.keys())
+        to_join = [tokens+n*[pad] for t in tokens]
+        return [y for x in to_join for y in x]
+        
     def get_iterator(self, split, *args, **kwargs):
         if split == 'train':
             data_iter = LMOrderedIterator(self.train, *args, **kwargs)
@@ -426,7 +437,7 @@ class Corpus:
 
             filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
 
-        return torch.tensor(filled)
+        return filled.
 
     def _tokenize_w_ticks(self, triples, ticks_per_second, pitch_vocab, time_steps_vocab):
         """
