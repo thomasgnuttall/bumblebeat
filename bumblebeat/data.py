@@ -372,7 +372,7 @@ class Corpus:
         pad = max(self.reverse_vocab.keys())
         to_join = [tokens+n*[pad] for t in tokens]
         return [y for x in to_join for y in x]
-        
+
     def get_iterator(self, split, *args, **kwargs):
         if split == 'train':
             data_iter = LMOrderedIterator(self.train, *args, **kwargs)
@@ -437,7 +437,7 @@ class Corpus:
 
             filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
 
-        return filled.
+        return filled
 
     def _tokenize_w_ticks(self, triples, ticks_per_second, pitch_vocab, time_steps_vocab):
         """
