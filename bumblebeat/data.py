@@ -103,6 +103,7 @@ def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processi
     return corpus
 
 
+
 class LMShuffledIterator(object):
     def __init__(self, data, bsz, bptt, device='cpu', ext_len=None, shuffle=False):
         """
@@ -193,6 +194,30 @@ class PartitionIterator(LMShuffledIterator):
 
         self.device = device
         self.shuffle = shuffle
+    
+    def get_batch(self, i, bptt=None):
+        if bptt is None: bptt = self.bptt
+        seq_len = min(bptt, self.data.size(0) - 1 - i)
+
+        end_idx = i + seq_len
+        beg_idx = max(0, i - self.ext_len)
+
+        data = self.data[beg_idx:end_idx]
+        target = self.data[i+1:i+1+seq_len]
+
+        return data, target, seq_len
+
+    def get_varlen_iter(self, start=0, std=5, min_len=5, max_deviation=3):
+        max_len = self.bptt + max_deviation * std
+        i = start
+        while True:
+            bptt = self.bptt if np.random.random() < 0.95 else self.bptt / 2.
+            bptt = min(max_len, max(min_len, int(np.random.normal(bptt, std))))
+            data, target, seq_len = self.get_batch(i, bptt)
+            i += seq_len
+            yield data, target, seq_len
+            if i >= self.data.size(0) - 2:
+                break
 
     def __iter__(self):
         #if self.shuffle:
