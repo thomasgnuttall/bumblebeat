@@ -1,7 +1,7 @@
 data_root: 'data/' # Directory ot store data
-batch_size: &batch_size 60 # Number of batches to split data into
-tgt_len: &tgt_len 70 # Number of steps to predict
-eval_tgt_len: 50 # number of tokens to predict for evaluation
+batch_size: &batch_size 12 # Number of batches to split data into
+tgt_len: &tgt_len 128 # Number of steps to predict - make as high as possible without peformance/memory running away
+eval_tgt_len: &eval_tgt_len 128 # number of tokens to predict for evaluation
 seed: 
 
 
@@ -22,7 +22,7 @@ processing:
 model:
     ## GPU ##
     num_core_per_host: 3 # Number of cores to use, should be a divisor of batch size
-    cuda: False
+    cuda: True
     multi_gpu: True # Use multiple GPUs
     gpu0_bsz: -1 # Batch size on gpu 0
 
@@ -40,7 +40,7 @@ model:
     ## Optimization ##
     optim: 'adam' # Which optimizer to use
     learning_rate: 0.00025 # Maximum learning rate
-    warmup_step: 0 # Number of steps for linear lr warmup (upper epoch lmit)
+    warmup_steps: 0 # Number of steps for linear lr warmup (upper epoch lmit)
     clip: 0.25 # Gradient clipping value
     clip_nonemb: True # Only clip the gradient of non-embedding params?
     min_lr_ratio: 0.004 # Minimum ratio learning rate (for cosine decay)
@@ -68,6 +68,7 @@ model:
 
     ## Model ##
     tgt_len: *tgt_len
+    eval_tgt_len: *eval_tgt_len
     mem_len: 512 # Number of steps to cache
     same_length: False # Same length attention
     clamp_len: 1 # Clamp length
@@ -81,7 +82,7 @@ model:
     dropatt: 0.1 # Attention dropout rate
     not_tied: True # untie r_w_bias and r_r_bias?
     pre_lnorm: True # Apply LayerNorm to the input instead of the output
-    varlen: True # Use variable Length
+    varlen: False # Use variable Length
     attn_type: 0 # Attention type. 0 for ours, 1 for Shaw et al, 2 for Vaswani et al, 3 for Al Rfou et al.
     ext_len: 0 # Legnth of the extended context
     batch_chunk: 1 # Split batch into chunks to save memory
@@ -108,10 +109,10 @@ model:
 
     log_interval: 200 # Report interval
     eval_interval: 4000 # Evaluation interval
-    work_dir: 'LM-TFM' # Experiment Directory
-    restart: True # Restart training fromn the saved checkpoint?
+    work_dir: 'gpu_run' # Experiment Directory
+    restart: False # Restart training fromn the saved checkpoint?
     restart_dir: '' # Restart directory
-    debug: True # Run in debug mode (do not create exp dir)
+    debug: False # Run in debug mode (do not create exp dir)
 
 
 
