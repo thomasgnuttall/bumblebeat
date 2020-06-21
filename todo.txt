@@ -1,6 +1,8 @@
-# Generator
-
 # Midi creator
+
+# Make end_time relative to qpm
+
+# Generator new style 
 
 # Similarity plots
 
