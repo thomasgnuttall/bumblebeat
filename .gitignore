@@ -83,5 +83,5 @@ target/
 .DS_Store
 
 # PyTorch
-.pt
+*.pt
 log.txt
