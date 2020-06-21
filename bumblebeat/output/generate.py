@@ -11,20 +11,30 @@ from bumblebeat.utils.data import split_range, create_dir_if_not_exists
 
 """
 # To Use
-    path = 'gpu_run-groove/full-midionly/20200620-222924/model.pt'
+    path = 'gpu_run-groove/full-midionly/20200620-091255/model.pt'
     USE_CUDA = False
     batch_size = 1
     tgt_len = 1
     ext_len = 0
     mem_len = 2000
     clamp_len = 1000
-    gen_len = 2
+    gen_len = 1000
     same_len = True
-
+    
+    simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
     device = torch.device("cuda" if USE_CUDA else "cpu")
 
     model = load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device)
     seq = generate_sequence(model, gen_len, batch_size, tgt_len, device)
+    note_sequence = tokens_to_note_sequence(
+        seq, 
+        pitch_vocab, 
+        simplified_pitches, 
+        10, 
+        time_vocab, 
+        143.99988480009216)
+    note_sequence_to_midi_file(note_sequence, '/Users/tom/Desktop/new_model.midi')
+
 """
 
 def load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device):
@@ -43,13 +53,6 @@ def load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device):
         raise NotImplementedError()
     if model.crit.n_clusters != 0:
         raise NotImplementedError()
-
-    # Change training length/memory attrs
-    model.reset_length(tgt_len, ext_len, mem_len)
-    if clamp_len > 0:
-        model.clamp_len = clamp_len
-    if same_len:
-        model.same_len = True
 
     # Turn on evaluation mode which disables dropout.
     model.eval()
@@ -93,8 +96,18 @@ def generate_sequence(model, gen_len, batch_size, tgt_len, device):
             # Add new token to buffer and update history
             samples = torch.cat([samples, token], dim=0)
             prev_token = token
+  
+    for i in range(args.num):
+        out_fn = str(i) + ext
+        out_fp = os.path.join(args.out_dir, out_fn)
+        sampler = TxlSimpleSampler(model, device, mem_len=args.mem_len)
+        seq = [0]
+        for _ in range(args.gen_len):
+            token, _ = sampler.sample_next_token_updating_mem(
+              seq[-1], temp=args.temp, topk=args.topk)
+            seq.append(token)
 
-    return samples
+    return [s.item() for s in samples]
 
 
 def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):

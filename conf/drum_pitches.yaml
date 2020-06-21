@@ -29,3 +29,6 @@ DEFAULT_DRUM_TYPE_PITCHES:
 
     # ride cymbal
     - [51, 53, 59, 82]
+
+
+SIMPLIFIED_PITCHES: [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
