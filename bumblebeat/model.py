@@ -1,3 +1,23 @@
+import click
+
+#from bumblebeat.data import data_main
+from bumblebeat.utils.data import load_yaml
+
+
+conf_path = 'conf/train_conf.yaml'
+conf = load_yaml(conf_path)
+
+conf['tgt_len'] = 128
+conf['batch_size'] = 24
+
+pitch_classes = load_yaml('conf/drum_pitches.yaml')
+time_steps_vocab = load_yaml('conf/time_steps_vocab.yaml')
+
+
+model_conf = conf['model']
+data_conf = conf['data']
+
+
 # coding: utf-8
 import argparse
 import time
@@ -15,6 +35,7 @@ from bumblebeat.data import get_corpus
 from bumblebeat.transformer import MemTransformerLM
 from bumblebeat.utils.exp_utils import create_exp_dir
 from bumblebeat.utils.data_parallel import BalancedDataParallel
+from bumblebeat.utils.data import create_dir_if_not_exists
 
 
 if model_conf['d_embed'] < 0:
@@ -25,8 +46,10 @@ assert model_conf['train_batch_size'] % model_conf['batch_chunk'] == 0
 
 model_conf['work_dir'] = '{}-{}'.format(model_conf['work_dir'], data_conf['dataset'])
 model_conf['work_dir'] = os.path.join(model_conf['work_dir'], time.strftime('%Y%m%d-%H%M%S'))
+#logging = create_exp_dir(model_conf['work_dir'],
+ #   scripts_to_save=['train.py', 'mem_transformer.py'], debug=model_conf['debug'])
 logging = create_exp_dir(model_conf['work_dir'],
-    scripts_to_save=['train.py', 'mem_transformer.py'], debug=model_conf['debug'])
+    scripts_to_save=None, debug=model_conf['debug'])
 
 # Set the random seed manually for reproducibility.
 #np.random.seed(model_conf['seed'])
@@ -62,7 +85,7 @@ corpus = get_corpus(
     time_steps_vocab,
     conf['processing']
 )
-ntokens = len(corpus.vocab)
+ntokens = corpus.vocab_size
 model_conf['n_token'] = ntokens
 
 cutoffs, tie_projs = [], [False]
@@ -178,7 +201,7 @@ if model_conf['optim'].lower() == 'sgd':
         optimizer_sparse = optim.SGD(sparse_params, lr=model_conf['learning_rate'] * 2)
         optimizer = optim.SGD(dense_params, lr=model_conf['learning_rate'], momentum=model_conf['mom'])
     else:
-        optimizer = optim.SGD(model.parameters(), lr=model_conf['learning_rate'],momentum=model_conf['mom'])
+        optimizer = optim.SGD(model.parameters(), lr=model_conf['learning_rate'], momentum=model_conf['mom'])
 elif model_conf['optim'].lower() == 'adam':
     if model_conf['sample_softmax'] > 0:
         dense_params, sparse_params = [], []
@@ -333,7 +356,7 @@ def train():
             # linear warmup stage
             if train_step < model_conf['warmup_steps']:
                 curr_lr = model_conf['learning_rate'] * train_step / model_conf['warmup_steps']
-                optimizer.param_groups[0]['learning_rate'] = curr_lr
+                optimizer.param_groups[0]['lr'] = curr_lr
                 if model_conf['sample_softmax'] > 0:
                     optimizer_sparse.param_groups[0]['learning_rate'] = curr_lr * 2
             else:
@@ -349,12 +372,9 @@ def train():
             elapsed = time.time() - log_start_time
             log_str = '| epoch {:3d} step {:>8d} | {:>6d} batches | lr {:.3g} ' \
                       '| ms/batch {:5.2f} | loss {:5.2f}'.format(
-                epoch, train_step, batch+1, optimizer.param_groups[0]['learning_rate'],
+                epoch, train_step, batch+1, optimizer.param_groups[0]['lr'],
                 elapsed * 1000 / model_conf['log_interval'], cur_loss)
-            if model_conf['dataset'] in ['enwik8', 'text8']:
-                log_str += ' | bpc {:9.5f}'.format(cur_loss / math.log(2))
-            else:
-                log_str += ' | ppl {:9.3f}'.format(math.exp(cur_loss))
+            log_str += ' | ppl {:9.3f}'.format(math.exp(cur_loss))
             logging(log_str)
             train_loss = 0
             log_start_time = time.time()
@@ -366,14 +386,12 @@ def train():
                       '| valid loss {:5.2f}'.format(
                 train_step // model_conf['eval_interval'], train_step,
                 (time.time() - eval_start_time), val_loss)
-            if model_conf['dataset'] in ['enwik8', 'text8']:
-                log_str += ' | bpc {:9.5f}'.format(val_loss / math.log(2))
-            else:
-                log_str += ' | valid ppl {:9.3f}'.format(math.exp(val_loss))
+            log_str += ' | valid ppl {:9.3f}'.format(math.exp(val_loss))
             logging(log_str)
             logging('-' * 100)
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
+                create_dir_if_not_exists(model_conf['work_dir'])
                 if not model_conf['debug']:
                     with open(os.path.join(model_conf['work_dir'], 'model.pt'), 'wb') as f:
                         torch.save(model, f)
@@ -412,6 +430,7 @@ except KeyboardInterrupt:
     logging('-' * 100)
     logging('Exiting from training early')
 
+create_dir_if_not_exists(model_conf['work_dir'])
 # Load the best saved model.
 with open(os.path.join(model_conf['work_dir'], 'model.pt'), 'rb') as f:
     model = torch.load(f)

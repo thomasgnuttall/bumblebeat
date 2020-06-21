@@ -360,7 +360,6 @@ class Corpus:
         if self.shuffle:
             np.random.shuffle(tokens)
 
-
         stream = self._join_token_list(tokens, n=5)
 
         return torch.tensor(stream)
