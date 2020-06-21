@@ -7,9 +7,6 @@ from bumblebeat.utils.data import load_yaml
 conf_path = 'conf/train_conf.yaml'
 conf = load_yaml(conf_path)
 
-conf['tgt_len'] = 128
-conf['batch_size'] = 24
-
 pitch_classes = load_yaml('conf/drum_pitches.yaml')
 time_steps_vocab = load_yaml('conf/time_steps_vocab.yaml')
 
