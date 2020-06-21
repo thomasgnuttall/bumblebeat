@@ -15,3 +15,5 @@ with expressive timing and dynamics, 2017.
 #Ian Simon and Sageev Oore. Performance RNN:
 #Generating music with expressive timing and dynamics. https://magenta.tensorflow.org/
 #performance-rnn, 2017.
+
+Training Tips for the Transformer Model
