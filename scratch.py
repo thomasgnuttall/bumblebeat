@@ -15,10 +15,12 @@ model_conf = conf['model']
 data_conf = conf['data']
 model_conf['cuda']= True
 model_conf['restart'] = False
+model_conf['varlen'] = False
 
 #LOOK INTO TIED/TIE_PROJ
 
-
+# fswatch bumblebeat/ | xargs -I {} rsync -avz -e "ssh -i ~/.ssh/aws_key.pem" bumblebeat/ ec2-user@ec2-18-224-8-121.us-east-2.compute.amazonaws.com:bumblebeat
+# scp -r -i ~/.ssh/aws_key.pem ec2-user@ec2-3-15-183-86.us-east-2.compute.amazonaws.com:bumblebeat/gpu_run-groove/ .
 #---------------------------------------------------------------------------
 #AttributeError                            Traceback (most recent call last)
 #<ipython-input-5-3ce0f28dd575> in <module>
@@ -50,3 +52,14 @@ model_conf['restart'] = False
 #    172         end_idx = i + seq_len
 
 #AttributeError: 'list_iterator' object has no attribute 'size'
+
+
+# /pytorch/aten/src/THC/THCTensorIndex.cu:362: void indexSelectLargeIndex(TensorInfo<T, IndexType>, TensorInfo<T, IndexType>, TensorInfo<long, IndexType>, int, int, IndexType, IndexType, long) [with T = float, IndexType = unsigned int, DstD
+# im = 2, SrcDim = 2, IdxDim = -2, IndexIsMajor = true]: block: [45,0,0], thread: [127,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+
+
+# /pytorch/aten/src/THC/THCTensorIndex.cu:362: void indexSelectLargeIndex(TensorInfo<T, IndexType>, TensorInfo<T, IndexType>, TensorInfo<long, IndexType>, int, int, IndexType, IndexType, long) [with T = float, IndexType = unsigned int, DstD
+# im = 2, SrcDim = 2, IdxDim = -2, IndexIsMajor = true]: block: [45,0,0], thread: [127,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+
+
+# RuntimeError: cublas runtime error : resource allocation failed at /pytorch/aten/src/THC/THCGeneral.cpp:250
