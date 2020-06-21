@@ -1,0 +1,12 @@
+# Generator
+
+# Midi creator
+
+# Similarity plots
+
+
+
+# Ge rid of these errors
+/opt/conda/conda-bld/pytorch_1587428091666/work/aten/src/ATen/native/cuda/LegacyDefinitions.cpp:19: UserWarning: masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.
+
+Warning: masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead. (masked_fill__cuda at /opt/conda/conda-bld/pytorch_1587428091666/work/aten/src/ATen/native/cuda/LegacyDefinitions.cpp:19)
