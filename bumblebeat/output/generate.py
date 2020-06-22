@@ -8,12 +8,11 @@ from magenta.music.protobuf import music_pb2
 
 from bumblebeat.transformer import MemTransformerLM
 from bumblebeat.utils.data import split_range, create_dir_if_not_exists
-
+from bumblebeat.utils.generation import TxlSimpleSampler
 """
 # To Use
-    path = 'gpu_run-groove/full-midionly/20200620-091255/model.pt'
+    path = 'gpu_run-groove/full-midionly/20200621-091255/model.pt'
     USE_CUDA = False
-    batch_size = 1
     tgt_len = 1
     ext_len = 0
     mem_len = 2000
@@ -24,8 +23,16 @@ from bumblebeat.utils.data import split_range, create_dir_if_not_exists
     simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
     device = torch.device("cuda" if USE_CUDA else "cpu")
 
-    model = load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device)
-    seq = generate_sequence(model, gen_len, batch_size, tgt_len, device)
+    model = load_model(path, device)
+    seq = generate_sequences(
+                    model,
+                    num=5, 
+                    gen_len=gen_len, 
+                    mem_len=mem_len, 
+                    device=device, 
+                    temp=0.95, 
+                    prime=[95], 
+                    topk=32)
     note_sequence = tokens_to_note_sequence(
         seq, 
         pitch_vocab, 
@@ -37,7 +44,7 @@ from bumblebeat.utils.data import split_range, create_dir_if_not_exists
 
 """
 
-def load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device):
+def load_model(path, device):
     """
     Load pretrained Transformer model for auto-regressive prediction
     """
@@ -60,54 +67,22 @@ def load_model(path, tgt_len, ext_len, mem_len, clamp_len, same_len, device):
     return model
 
 
-def generate_sequence(model, gen_len, batch_size, tgt_len, device):
+def generate_sequences(model, num, gen_len, mem_len, device, temp, prime=[], topk=32):
     """
-    Generate sample of len <gen_len> using pretrained transformer <model>
+    Generate samples of len <gen_len> using pretrained transformer <model>
     """
+    all_seqs = []
     # Generate sequences of specified length and number
-    with torch.no_grad():
-        # Create buffer for generated sequences
-        samples = torch.zeros([0, batch_size], dtype=torch.int64).to(device)
-
-        # Initialize state
-        prev_token = torch.zeros([tgt_len, batch_size], dtype=torch.int64).to(device)
-        mems = tuple()
-
-        # Autoregressive sampling
-        for i in range(gen_len):
-            ret = model.forward_generate(prev_token, *mems)
-
-            # Retrieve logits and memory
-            logits, mems = ret[0], ret[1:]
-
-            # Ignore <S> (end of sequence) logit
-            logits = logits[:, :, 1:]
-
-            # Compute probabilities
-            probs = F.softmax(logits, dim=-1)
-
-            # Sample from probabilities
-            sampler = torch.distributions.categorical.Categorical(probs=probs)
-            token = sampler.sample()
-
-            # Shift by one because we ignored <S> earlier
-            token += 1
-
-            # Add new token to buffer and update history
-            samples = torch.cat([samples, token], dim=0)
-            prev_token = token
-  
-    for i in range(args.num):
-        out_fn = str(i) + ext
-        out_fp = os.path.join(args.out_dir, out_fn)
-        sampler = TxlSimpleSampler(model, device, mem_len=args.mem_len)
-        seq = [0]
-        for _ in range(args.gen_len):
+    for i in range(num):
+        sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
+        seq = prime
+        for _ in range(gen_len):
             token, _ = sampler.sample_next_token_updating_mem(
-              seq[-1], temp=args.temp, topk=args.topk)
+              seq[-1], temp=temp, topk=topk)
             seq.append(token)
+        all_seqs.append(seq)
 
-    return [s.item() for s in samples]
+    return all_seqs
 
 
 def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):
