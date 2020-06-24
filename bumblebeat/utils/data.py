@@ -51,3 +51,7 @@ def create_dir_if_not_exists(path):
     # Do not try and create directory if path is just a filename
     if (not os.path.exists(directory)) and (directory != ''):
         os.makedirs(directory)
+
+
+def round_to_nearest_multiple(n, mul):
+    return mul * round(n/mul)

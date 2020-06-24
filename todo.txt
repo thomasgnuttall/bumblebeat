@@ -1,8 +1,8 @@
-# Midi creator
+# Bug fix
+
+# Augmentation
 
 # Make end_time relative to qpm
-
-# Generator new style 
 
 # Similarity plots
 

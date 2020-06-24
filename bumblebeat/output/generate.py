@@ -20,27 +20,29 @@ from bumblebeat.utils.generation import TxlSimpleSampler
     gen_len = 1000
     same_len = True
     
+    hat_prime=[95,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42]
     simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
     device = torch.device("cuda" if USE_CUDA else "cpu")
 
     model = load_model(path, device)
-    seq = generate_sequences(
+    seqs = generate_sequences(
                     model,
-                    num=5, 
+                    num=1, 
                     gen_len=gen_len, 
                     mem_len=mem_len, 
                     device=device, 
                     temp=0.95, 
-                    prime=[95], 
+                    prime=hat_prime, 
                     topk=32)
-    note_sequence = tokens_to_note_sequence(
-        seq, 
-        pitch_vocab, 
-        simplified_pitches, 
-        10, 
-        time_vocab, 
-        143.99988480009216)
-    note_sequence_to_midi_file(note_sequence, '/Users/tom/Desktop/new_model.midi')
+    for i,s in enumerate(seq):
+        note_sequence = tokens_to_note_sequence(
+            s[1:], 
+            pitch_vocab, 
+            simplified_pitches, 
+            10, 
+            time_vocab, 
+            143.99988480009216)
+        note_sequence_to_midi_file(note_sequence, f'/Users/tom/Desktop/new_gen_{i}.midi')
 
 """
 
@@ -114,7 +116,6 @@ def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, t
     music_pb2.NoteSequence
     """
     # Token to mark separation between samples
-    special_token = max(pitch_vocab.keys()) + 1
     time_tokens = list(time_vocab.values())
     reverse_time_vocab = {v:k for k,v in time_vocab.items()}
 

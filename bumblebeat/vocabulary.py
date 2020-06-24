@@ -1,11 +1,12 @@
 import itertools
 
-def create_vocab(n_instruments, n_velocity_buckets, first_index=5):
+def create_vocab(n_instruments, n_velocity_buckets, first_index=6):
     """
     Create vocabulary of all possible instrument-velocity combinations.
 
-    <first_index> dictates which index to start on, default 5 to allow for
-    5 timestep tokens.
+    <first_index> dictates which index to start on, default 6 to allow for
+    0 to be special token indicating end and start of sequence and 1-5 to 
+    represent time steps in time_steps_vocab.yaml.
 
     Each instrument is represented by <n_velocity_buckets> integers
     Tokens increase across the dimension of instruments first:

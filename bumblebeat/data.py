@@ -297,7 +297,7 @@ class Corpus:
         print(f'Generating vocab of {self.n_instruments} instruments and {n_velocity_buckets} velocity buckets')
         self.vocab, self.reverse_vocab = bumblebeat.vocabulary.create_vocab(
                         self.n_instruments, n_velocity_buckets, 
-                        first_index=len(time_steps_vocab)
+                        first_index=len(time_steps_vocab)+1
                     ) # leave initial indices for time steps vocab
 
         self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add 1 for <eos> token
@@ -355,12 +355,12 @@ class Corpus:
         ]
 
         # note sequence -> [(pitch, vel_bucket, start timestep)]
-        tokens = [self._tokenize(d, quantize=quantize) for d in dev_sequences]
+        tokens = [self._tokenize(d, steps_per_quarter, quantize) for d in dev_sequences]
         
         if self.shuffle:
             np.random.shuffle(tokens)
 
-        stream = self._join_token_list(tokens, n=5)
+        stream = self._join_token_list(tokens, n=1)
 
         return torch.tensor(stream)
     
@@ -370,9 +370,9 @@ class Corpus:
         In new list each previous list is separated by <n> instances
         of the highest token value (token assigned for placeholding)
         """
-        pad = max(self.reverse_vocab.keys())
+        pad = 0
         to_join = [t+n*[pad] for t in tokens]
-        return [y for x in to_join for y in x]
+        return [pad] + [y for x in to_join for y in x]
 
     def get_iterator(self, split, *args, **kwargs):
         if split == 'train':
@@ -409,7 +409,7 @@ class Corpus:
         ts = s.time_signatures[0]
         return (ts.numerator == 4 and ts.denominator == 4)
 
-    def _tokenize(self, note_sequence, quantize):
+    def _tokenize(self, note_sequence, steps_per_quarter, quantize):
         """
         from magenta <note_sequence> return list of
         tokens, filling silence with time tokens in
@@ -420,27 +420,20 @@ class Corpus:
         - velocities are bucketted as per self.velocity_buckets
         """
         d = [(self.pitch_class_map[n.pitch], \
-              bumblebeat.utils.data.get_bucket_number(n.velocity, self.velocity_buckets),
+              bumblebeat.utils.data.get_bucket_number(n.velocity, self.velocity_buckets), \
               n.quantized_start_step if quantize else s.start_time) \
                 for n in note_sequence.notes \
                 if n.pitch in self.pitch_class_map]
-        
-        # Remove and fill list with silence vocab
-        if quantize:
-            #total_steps = note_sequence.total_quantized_steps
-            #timestep_lim = self._roundup(total_steps, 4)
-            #
-            #filled = fill_timestep_silence(d, timestep_lim, self.time_steps_vocab)
-        #else:
-            ticks_per_quarter = note_sequence.ticks_per_quarter
-            qpm = note_sequence.tempos[0].qpm # quarters per minute
-            ticks_per_second = qpm*ticks_per_quarter/60
+    
+        ticks_per_quarter = note_sequence.ticks_per_quarter
+        qpm = note_sequence.tempos[0].qpm # quarters per minute
+        ticks_per_second = qpm*ticks_per_quarter/60
 
-            filled = self._tokenize_w_ticks(d, ticks_per_second, self.vocab, self.time_steps_vocab)
+        filled = self._tokenize_w_ticks(d, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, self.vocab, self.time_steps_vocab)
 
         return filled
 
-    def _tokenize_w_ticks(self, triples, ticks_per_second, pitch_vocab, time_steps_vocab):
+    def _tokenize_w_ticks(self, triples, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, pitch_vocab, time_steps_vocab):
         """
         From list of <triples> in the form:
             [(pitch class, bucketed velocity, start time (seconds)),...]
@@ -465,7 +458,12 @@ class Corpus:
                 silence = z
             else:
                 silence = z - triples[i-1][2] # z of previous element
-            ticks = int(silence*ticks_per_second)
+
+            if quantize:
+                ticks = silence*ticks_per_quarter/steps_per_quarter
+            else:
+                ticks = int(silence*ticks_per_second)
+
             if ticks:
                 # make sure that any consecutive pitches in sequence
                 # are in numerical order so as to enforce an ordering
