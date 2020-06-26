@@ -53,6 +53,7 @@ from bumblebeat.data import get_corpus
 conf_path = 'conf/train_conf.yaml'
 conf = load_yaml(conf_path)
 
+
 pitch_classes = load_yaml('conf/drum_pitches.yaml')
 time_vocab = load_yaml('conf/time_steps_vocab.yaml')
 
