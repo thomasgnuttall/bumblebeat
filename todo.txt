@@ -1,6 +1,12 @@
-# Bug fix
+# join sequences from accompany
 
-# Augmentation
+# evaluation
+
+# boilerplate for generate (file->file)
+
+# Model CLI
+
+# embedding
 
 # Make end_time relative to qpm
 

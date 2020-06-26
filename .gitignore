@@ -85,3 +85,4 @@ target/
 # PyTorch
 *.pt
 log.txt
+.swp

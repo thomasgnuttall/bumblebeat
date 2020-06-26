@@ -11,7 +11,35 @@ from bumblebeat.utils.data import split_range, create_dir_if_not_exists
 from bumblebeat.utils.generation import TxlSimpleSampler
 """
 # To Use
-    path = 'gpu_run-groove/full-midionly/20200621-091255/model.pt'
+    # lower temp and topk sampling
+
+
+    import click
+    
+    #from bumblebeat.data import data_main
+    from bumblebeat.utils.data import load_yaml
+    from bumblebeat.data import get_corpus
+    
+    conf_path = 'conf/train_conf.yaml'
+    conf = load_yaml(conf_path)
+    
+    pitch_classes = load_yaml('conf/drum_pitches.yaml')
+    time_vocab = load_yaml('conf/time_steps_vocab.yaml')
+    
+    
+    model_conf = conf['model']
+    data_conf = conf['data']
+    
+    corpus = get_corpus(
+        data_conf['dataset'],
+        data_conf['data_dir'],
+        pitch_classes['DEFAULT_DRUM_TYPE_PITCHES'],
+        time_steps_vocab,
+        conf['processing']
+    )
+    pitch_vocab = corpus.reverse_vocab
+
+    path = 'gpu_run-groove/full-midionly/20200624-191931/train_step_120015/model.pt'
     USE_CUDA = False
     tgt_len = 1
     ext_len = 0
@@ -31,10 +59,9 @@ from bumblebeat.utils.generation import TxlSimpleSampler
                     gen_len=gen_len, 
                     mem_len=mem_len, 
                     device=device, 
-                    temp=0.95, 
-                    prime=hat_prime, 
+                    temp=0.80, 
                     topk=32)
-    for i,s in enumerate(seq):
+    for i,s in enumerate(seqs):
         note_sequence = tokens_to_note_sequence(
             s[1:], 
             pitch_vocab, 
@@ -42,7 +69,7 @@ from bumblebeat.utils.generation import TxlSimpleSampler
             10, 
             time_vocab, 
             143.99988480009216)
-        note_sequence_to_midi_file(note_sequence, f'/Users/tom/Desktop/new_gen_{i}.midi')
+        note_sequence_to_midi_file(note_sequence, f'/Users/tom/Desktop/bug_fix_2_{i}.midi')
 
 """
 
@@ -69,7 +96,7 @@ def load_model(path, device):
     return model
 
 
-def generate_sequences(model, num, gen_len, mem_len, device, temp, prime=[], topk=32):
+def generate_sequences(model, num, gen_len, mem_len, device, temp, topk=32):
     """
     Generate samples of len <gen_len> using pretrained transformer <model>
     """
@@ -77,7 +104,7 @@ def generate_sequences(model, num, gen_len, mem_len, device, temp, prime=[], top
     # Generate sequences of specified length and number
     for i in range(num):
         sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
-        seq = prime
+        seq = [0]
         for _ in range(gen_len):
             token, _ = sampler.sample_next_token_updating_mem(
               seq[-1], temp=temp, topk=topk)
@@ -86,6 +113,128 @@ def generate_sequences(model, num, gen_len, mem_len, device, temp, prime=[], top
 
     return all_seqs
 
+
+def accompany_sequence(model, seq, gen_len, temp, topk, mem_len, device):
+    """
+    Continue/accompany sequence, <seq> sampling from <model>
+
+    Param
+    =====
+    model: 
+        Trained transformer model
+    seq: list
+        Tokenised sequence to accompany
+    gen_len: int
+        How many tokens to generate
+    temp: float
+        Between 0 and 1. 
+        1 samples from model prob dist
+        0 always takes most likely
+    topk: n
+        k for topk sampling
+    mem_len: int
+        memory length of model
+    device: torch device
+        cpu or gpu
+
+    Return
+    ======
+    Accompanying tokenised sequence (needs to be joined to original using join_sequences())
+
+    """
+    assert gen_len <= len(seq), "Cannot accompany beyond length of input sequence"
+    sampler = TxlSimpleSampler(model, device, mem_len=memlen)
+
+    inp = 0
+    nll = 0.
+    rhythm = []
+    for i in range(gen_len):
+        _, probs = sampler.sample_next_token_updating_mem(inp, exclude_eos=False)
+        _probs = probs.cpu().numpy()
+        
+        _probmask = np.zeros_like(_probs)
+        _probmask[seq] = 1.
+        _probs *= _probmask
+        
+        if topk is not None:
+            ind = np.argpartition(_probs, -topk)[-topk:]
+            _probmask = np.zeros_like(_probs)
+            _probmask[seq] = 1.
+            _probs *= _probmask
+        
+        _probs /= np.sum(_probs)
+        tar = np.random.choice(corpus.vocab_size, p=_probs)
+        assert tar in seq
+        rhythm.append(tar)
+
+        inp = tar
+    return rhythm
+
+
+def continue_sequence(model, seq, prime_len, gen_len, temp, topk, mem_len, device):
+    """
+    Continue/accompany sequence, <seq> sampling from <model>
+
+    Param
+    =====
+    model: 
+        Trained transformer model
+    seq: list
+        Tokenised sequence to continue
+    prime_len: int
+        How many of thje most recent tokens in <seq> to 
+        use to prime the model
+    gen_len: int
+        How many tokens to generate
+    temp: float
+        Between 0 and 1. 
+        1 samples from model prob dist
+        0 always takes most likely
+    topk: n
+        k for topk sampling
+    mem_len: int
+        memory length of model
+    device: torch device
+        cpu or gpu
+
+    Return
+    ======
+    Original tokenised sequence continued by <gen_len> tokens
+
+    """
+    assert len(seq) >= prime_len + 1, "Insufficient tokens for prime length"
+
+    sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
+
+    sampler = prime_sampler(sampler, seq, prime_len)
+
+    nll = 0.
+    cont = seq[:]
+    for i in range(gen_len):
+        gen, probs = sampler.sample_next_token_updating_mem(inp, temp=temp, topk=topk)
+        p = probs[gen].cpu().item()
+        nll += -np.log(p)
+        inp = gen
+        cont.append(gen)
+
+    return cont
+
+
+def prime_sampler(sampler, seq, prime_len):
+    """
+    Prime TXSimpleSampler with <seq> using <prime_len>
+    """
+    inp = 0
+    nll = 0.
+    for i in range(prime_len):
+        tar = seq[i + 1]
+        _, probs = sampler.sample_next_token_updating_mem(inp, exclude_eos=False)
+        p = probs[tar].cpu().item()
+        nll += -np.log(p)
+        inp = tar
+
+    return sampler
+    
 
 def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):
     """

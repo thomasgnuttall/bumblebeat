@@ -1,5 +1,5 @@
 data_root: 'data/' # Directory ot store data
-batch_size: &batch_size 12 # Number of batches to split data into
+batch_size: &batch_size 6 # Number of batches to split data into
 tgt_len: &tgt_len 128 # Number of steps to predict - make as high as possible without peformance/memory running away
 eval_tgt_len: &eval_tgt_len 128 # number of tokens to predict for evaluation
 seed: 
@@ -53,7 +53,7 @@ model:
     dynamic-loss-scale: True # supersedes static-loss-scale
 
     ## Training ##
-    max_step: 400000 # Upper epoch limit
+    max_step: 200000 # Upper epoch limit
     train_batch_size: *batch_size # Size of train batch
     eval_batch_size: *batch_size # Size of valid batch
     iterations: 200 # Number of iterations per repeat loop
@@ -70,8 +70,8 @@ model:
     tgt_len: *tgt_len
     eval_tgt_len: *eval_tgt_len
     mem_len: 512 # Number of steps to cache
-    same_length: False # Same length attention
-    clamp_len: 1 # Clamp length
+    same_length: True # Same length attention
+    clamp_len: -1 # Clamp length
     n_layer: 12 # Number of layers
     d_model: 512 # Dimension of model
     d_embed: 512 # Dimension of embeddings

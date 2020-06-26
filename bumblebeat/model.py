@@ -388,11 +388,11 @@ def train():
             logging('-' * 100)
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
-                create_dir_if_not_exists(model_conf['work_dir'])
+                create_dir_if_not_exists(os.path.join(model_conf['work_dir'], f'train_step_{train_step}', ''))
                 if not model_conf['debug']:
-                    with open(os.path.join(model_conf['work_dir'], 'model.pt'), 'wb') as f:
+                    with open(os.path.join(model_conf['work_dir'], f'train_step_{train_step}', 'model.pt'), 'wb') as f:
                         torch.save(model, f)
-                    with open(os.path.join(model_conf['work_dir'], 'optimizer.pt'), 'wb') as f:
+                    with open(os.path.join(model_conf['work_dir'], f'train_step_{train_step}', 'optimizer.pt'), 'wb') as f:
                         torch.save(optimizer.state_dict(), f)
                 best_val_loss = val_loss
 

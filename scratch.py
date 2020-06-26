@@ -41,95 +41,58 @@ dev_sequences = [corpus._quantize(d, 4) for d in dev_sequences]
 
 simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
 
-original = dev_sequences[2]
-tokens = corpus._tokenize(original)
-reconstructed = tokens_to_note_sequence(
-							tokens, 
-							corpus.reverse_vocab, 
-							simplified_pitches, 
-							10, 
-							time_steps_vocab, 
-							143.99988480009216,
-							time_sig=(4,4), 
-							ticks_per_quarter=original.ticks_per_quarter)
+original = dev_sequences[0]
+tokens = corpus._tokenize(original, 4, True)
+
+import click
+
+#from bumblebeat.data import data_main
+from bumblebeat.utils.data import load_yaml
+from bumblebeat.data import get_corpus
+
+conf_path = 'conf/train_conf.yaml'
+conf = load_yaml(conf_path)
+
+pitch_classes = load_yaml('conf/drum_pitches.yaml')
+time_vocab = load_yaml('conf/time_steps_vocab.yaml')
 
 
-#_tokenize
-triples = [(corpus.pitch_class_map[n.pitch], \
-      get_bucket_number(n.velocity, corpus.velocity_buckets),
-      n.start_time) \
-        for n in original.notes \
-        if n.pitch in corpus.pitch_class_map]
+model_conf = conf['model']
+data_conf = conf['data']
 
-ticks_per_quarter = 480
-qpm = original.tempos[0].qpm # quarters per minute
-ticks_per_second = qpm*ticks_per_quarter/60
+corpus = get_corpus(
+    data_conf['dataset'],
+    data_conf['data_dir'],
+    pitch_classes['DEFAULT_DRUM_TYPE_PITCHES'],
+    time_steps_vocab,
+    conf['processing']
+)
+pitch_vocab = corpus.reverse_vocab
 
-pitch_vocab = corpus.vocab
+path = 'gpu_run-groove/full-midionly/20200624-191931/train_step_120015/model.pt'
+USE_CUDA = False
+tgt_len = 1
+ext_len = 0
+mem_len = 2000
+clamp_len = 1000
+gen_len = 1000
+same_len = True
 
-# Initalise final tokenised sequence
-w_silence = []
+hat_prime=[95,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42]
+simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
+device = torch.device("cuda" if USE_CUDA else "cpu")
 
-# Initalise counter to keep track of consecutive pitches
-# so that we can ensure they are appended to our
-# final tokenised sequence in numerical order
-consecutive_pitches = 0
+model = load_model(path, device)
 
-# index, (pitch, velocity, start time)
-for i, (x, y, z) in enumerate(triples):
-    if i == 0:
-        silence = z
-    else:
-        silence = z - triples[i-1][2] # z of previous element
-        import ipdb; ipdb.set_trace()
-    ticks = int(silence*ticks_per_second)
-    if ticks > ticks_per:
-        # make sure that any consecutive pitches in sequence
-        # are in numerical order so as to enforce an ordering
-        # rule for pitches that are commonly hit in unison
-        w_silence[-consecutive_pitches:] = sorted(w_silence[-consecutive_pitches:])
+samplefrom = tokens
 
-        # Since silences are computed using time since last pitch class,
-        # every iteration in this loop is a pitch class.
-        # Hence we set consecutive pitch back to one 
-        # (representing the pitch of this iteration, added just outside of this if-clause)
-        consecutive_pitches = 1
+temp = 0.95
+topk = 32
+memlen = 512
 
-        # Number of ticks to list of time tokens
-        time_tokens = corpus._convert_num_to_denominations(ticks, time_steps_vocab)
+temp = 0.96
+topk = 64
 
-        # Add time tokens to final sequence before we add our pitch class
-        w_silence += time_tokens
-    else:
-        # Remember that every iteration is a pitch.
-        # If <ticks> is 0 then this pitch occurs
-        # simultaneously with the previous.
-        # We sort these numerically before adding the
-        # next stream of time tokens
-        consecutive_pitches += 1
-
-    # Triple to tokens...
-    #   Discard time since we have handled that with time tokens.
-    #   Look up pitch velocity combination for corresponding token.
-    pitch_tok = pitch_vocab[x][y] # [pitch class][velocity]
-    w_silence.append(pitch_tok)
+def continue_sequence(model, seq, prime_len, gen_len, temp, topk, mem_len, device):
 
 
-
-
-
-
-
-
-# Remove and fill list with silence vocab
-if quantize:
-    #total_steps = note_sequence.total_quantized_steps
-    #timestep_lim = corpus._roundup(total_steps, 4)
-    #
-    #filled = fill_timestep_silence(d, timestep_lim, corpus.time_steps_vocab)
-#else:
-    ticks_per_quarter = note_sequence.ticks_per_quarter
-    qpm = note_sequence.tempos[0].qpm # quarters per minute
-    ticks_per_second = qpm*ticks_per_quarter/60
-
-    filled = corpus._tokenize_w_ticks(d, ticks_per_second, corpus.vocab, time_steps_vocab)
