@@ -13,7 +13,6 @@ from bumblebeat.utils.generation import TxlSimpleSampler
 # To Use
     # lower temp and topk sampling
 
-
     import click
     
     #from bumblebeat.data import data_main
@@ -234,7 +233,7 @@ def prime_sampler(sampler, seq, prime_len):
         inp = tar
 
     return sampler
-    
+
 
 def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):
     """

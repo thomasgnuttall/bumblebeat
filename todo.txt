@@ -1,10 +1,16 @@
 # join sequences from accompany
 
 # evaluation
+- log-> chart
+- perplexity
+- MAE
+- MEE
 
 # boilerplate for generate (file->file)
 
 # Model CLI
+
+# Pre train on lakh
 
 # embedding
 

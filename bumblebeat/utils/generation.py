@@ -25,10 +25,10 @@ class TxlSimpleSampler:
     last_token = last_token if last_token is not None else 0
 
     # Ensure that user is always passing 0 on first call
-    #if len(self.generated) == 0:
-    #  assert len(self.mems) == 0
-    #  if last_token != 0:
-    #    raise Exception()
+    if len(self.generated) == 0:
+      assert len(self.mems) == 0
+      if last_token != 0:
+        raise Exception()
 
     # Ensure that user isn't passing 0 after first call
     if last_token == 0 and len(self.generated) > 0:
