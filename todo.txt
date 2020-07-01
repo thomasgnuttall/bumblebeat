@@ -3,8 +3,17 @@
 # evaluation
 - log-> chart
 - perplexity
-- MAE
-- MEE
+
+# Generate examples
+
+# Similarity plots
+
+
+# Next steps Lakhnes
+# Next steps listener tests
+# Next steps velocity experimentation
+
+
 
 # boilerplate for generate (file->file)
 
@@ -12,11 +21,13 @@
 
 # Pre train on lakh
 
-# embedding
+# Listening test typeform 
 
 # Make end_time relative to qpm
 
-# Similarity plots
+# README
+
+
 
 
 

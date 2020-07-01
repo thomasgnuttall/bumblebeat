@@ -41,7 +41,7 @@ dev_sequences = [corpus._quantize(d, 4) for d in dev_sequences]
 
 simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
 
-original = dev_sequences[0]
+original = dev_sequences[1]
 tokens = corpus._tokenize(original, 4, True)
 
 import click
@@ -94,6 +94,21 @@ memlen = 512
 temp = 0.96
 topk = 64
 
-def continue_sequence(model, seq, prime_len, gen_len, temp, topk, mem_len, device):
+        note_sequence = tokens_to_note_sequence(
+            continued, 
+            pitch_vocab, 
+            simplified_pitches, 
+            10, 
+            time_vocab, 
+            143.99988480009216)
+        note_sequence_to_midi_file(note_sequence, f'/Users/tom/Desktop/continued.midi')
+
+sampler = TxlSimpleSampler(model, device, mem_len=50)
+
+primed_sampler = prime_sampler(sampler, tokens, len(tokens)-1)
+
+
+
+
 
 

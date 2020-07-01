@@ -98,6 +98,29 @@ def load_model(path, device):
 def generate_sequences(model, num, gen_len, mem_len, device, temp, topk=32):
     """
     Generate samples of len <gen_len> using pretrained transformer <model>
+
+    Param
+    =====
+    model: 
+        Trained transformer model
+    num: int
+        Number of sequences to generate
+    gen_len: int
+        How many tokens to generate
+    mem_len: int
+        memory length of model
+    device: torch device
+        cpu or gpu
+    temp: float
+        Between 0 and 1. 
+        1 samples from model prob dist
+        0 always takes most likely
+    topk: n
+        k for topk sampling
+
+    Return
+    ======
+    Accompanying tokenised sequence (needs to be joined to original using join_sequences())
     """
     all_seqs = []
     # Generate sequences of specified length and number
@@ -223,6 +246,8 @@ def prime_sampler(sampler, seq, prime_len):
     """
     Prime TXSimpleSampler with <seq> using <prime_len>
     """
+    if prime_len > len(seq) - 2:
+        prime_len = len(seq) - 2
     inp = 0
     nll = 0.
     for i in range(prime_len):

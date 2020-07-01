@@ -271,7 +271,7 @@ class Corpus:
             pitch_classes,
             time_steps_vocab,
             processing_conf,
-            n_velocity_buckets=10,
+            n_velocity_buckets=4,
             min_velocity=0,
             max_velocity=127,
             augment_stretch=True,
@@ -302,19 +302,20 @@ class Corpus:
 
         self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add 1 for <eos> token
 
-        train_data = self.download_midi(dataset_name, tfds.Split.TRAIN)
-        test_data = self.download_midi(dataset_name, tfds.Split.TEST)
-        valid_data = self.download_midi(dataset_name, tfds.Split.VALIDATION)
-        #all_data = self.download_midi(dataset_name, tfds.Split.ALL)
+        train_dataset = self.download_midi(dataset_name, tfds.Split.TRAIN)
+        test_dataset = self.download_midi(dataset_name, tfds.Split.TEST)
+        valid_dataset = self.download_midi(dataset_name, tfds.Split.VALIDATION)
+
+        self.train_data = [x for x in train_dataset]
+        self.test_data = [x for x in test_dataset]
+        self.valid_data = [x for x in valid_dataset]
         
         print('Processing dataset TRAIN...')
-        self.train = self.process_dataset(train_data, conf=processing_conf)
+        self.train = self.process_dataset(self.train_data, conf=processing_conf)
         print('Processing dataset TEST...')
-        self.test = self.process_dataset(test_data, conf=processing_conf)
+        self.test = self.process_dataset(self.test_data, conf=processing_conf)
         print('Processing dataset VALID...')
-        self.valid = self.process_dataset(valid_data, conf=processing_conf)
-
-        # TODO: Augment Data
+        self.valid = self.process_dataset(self.valid_data, conf=processing_conf)
 
     def download_midi(self, dataset_name, dataset_split):
         print(f"Downloading midi data: {dataset_name}, split: {dataset_split}")

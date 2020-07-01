@@ -86,3 +86,9 @@ target/
 *.pt
 log.txt
 *.swp
+
+# Output
+*.csv
+*.tsv
+*.png
+

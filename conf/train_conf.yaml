@@ -39,7 +39,7 @@ model:
     
     ## Optimization ##
     optim: 'adam' # Which optimizer to use
-    learning_rate: 0.00025 # Maximum learning rate
+    learning_rate: 0.000025 # Maximum learning rate
     warmup_steps: 0 # Number of steps for linear lr warmup (upper epoch lmit)
     clip: 0.25 # Gradient clipping value
     clip_nonemb: True # Only clip the gradient of non-embedding params?
