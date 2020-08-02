@@ -128,14 +128,15 @@ def get_embeddings(dataset, corpus, model, mem_len=512, prime_len=512, quantize=
 
     tokens = [corpus._tokenize(d, steps_per_quarter, quantize) for d in dev_sequences]
 
-    embeddings = np.array([get_embedding(s, model, mem_len, prime_len) for s in tokens])
+    embeddings = [get_embedding(s, model, mem_len, prime_len) for s in tokens]
+    return embeddings
     
-    num_features = embeddings[0].shape[0]
-    feat_names = [f'feat_{i}' for i in range(num_features)]
-
-    df = pd.DataFrame(embeddings, columns=feat_names)
-    
-    return df
+    #num_features = embeddings[0].shape[0]
+    #feat_names = [f'feat_{i}' for i in range(num_features)]
+#
+    #df = pd.DataFrame(embeddings, columns=feat_names)
+    #
+    #return df
 
 
 def get_metadata(dataset, genre_lookup):
@@ -148,7 +149,7 @@ def get_metadata(dataset, genre_lookup):
     return pd.DataFrame({
             'primary_style':primary_style,
             'secondary_style':secondary_style,
-            'drummer':drummer,})
+            'drummer':drummer})
 
 
 # Load model
@@ -172,15 +173,16 @@ def get_embedding(seq, model, mem_len, prime_len=None):
 
     sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
 
-    primed = prime_sampler(sampler, seq, prime_len)
+    _, primed = prime_sampler(sampler, seq, prime_len)
 
     # Hidden states
     mems = sampler.mems
 
-    # Final state
-    final_state = mems[0].transpose(0,1)[0][-1]
+    return mems
+## Final state
+#final_state = mems[0].transpose(0,1)[0][-1]
 
-    return final_state.numpy()
+#return final_state.numpy()
 
 
 def learn_tsne(df, title='TSNE of training sample embeddings', label='primary_style'):
@@ -192,8 +194,8 @@ def learn_tsne(df, title='TSNE of training sample embeddings', label='primary_st
     pd_data = pd.DataFrame(data, columns=['x','y'])
     pd_data['labels'] = df[label].values
 
-    rev_label = [lookup_genre[i] for i in pd_data['labels']]
-
+    #rev_label = [lookup_genre[i] for i in pd_data['labels']]
+    
     num_labels = len(set(pd_data['labels']))
     colours = random.choices(list(cnames.keys()), k=num_labels)
 
