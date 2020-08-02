@@ -91,4 +91,6 @@ log.txt
 *.csv
 *.tsv
 *.png
-
+*.midi
+*.wav
+*.mp3s
