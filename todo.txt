@@ -1,3 +1,7 @@
+# wrap up mmodel code
+
+# Experiment with quantization and velocity
+
 # join sequences from accompany
 
 # evaluation
@@ -21,9 +25,7 @@
 
 # Pre train on lakh
 
-# Listening test typeform 
-
-# Make end_time relative to qpm
+# Listening test  
 
 # README
 
