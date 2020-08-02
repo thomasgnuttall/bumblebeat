@@ -39,12 +39,11 @@ from bumblebeat.utils.generation import TxlSimpleSampler
     pitch_vocab = corpus.reverse_vocab
 
     path = 'gpu_run-groove/full-midionly/20200624-191931/train_step_120015/model.pt'
+    
+    path = 'train_step_32000/model.pt'
     USE_CUDA = False
-    tgt_len = 1
-    ext_len = 0
-    mem_len = 2000
-    clamp_len = 1000
-    gen_len = 1000
+    mem_len = 1000
+    gen_len = 2000
     same_len = True
     
     hat_prime=[95,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42,2,2,2,2,1,1,1,1,1,1,1,1,42]
@@ -54,11 +53,11 @@ from bumblebeat.utils.generation import TxlSimpleSampler
     model = load_model(path, device)
     seqs = generate_sequences(
                     model,
-                    num=1, 
+                    num=5, 
                     gen_len=gen_len, 
                     mem_len=mem_len, 
                     device=device, 
-                    temp=0.80, 
+                    temp=0.95, 
                     topk=32)
     for i,s in enumerate(seqs):
         note_sequence = tokens_to_note_sequence(
@@ -68,7 +67,7 @@ from bumblebeat.utils.generation import TxlSimpleSampler
             10, 
             time_vocab, 
             143.99988480009216)
-        note_sequence_to_midi_file(note_sequence, f'/Users/tom/Desktop/bug_fix_2_{i}.midi')
+        note_sequence_to_midi_file(note_sequence, f'sound_examples/experiments/old_model_{i}.midi')
 
 """
 
@@ -136,7 +135,7 @@ def generate_sequences(model, num, gen_len, mem_len, device, temp, topk=32):
     return all_seqs
 
 
-def accompany_sequence(model, seq, gen_len, temp, topk, mem_len, device):
+def accompany_sequence(model, seq, silence_tokens, gen_len, temp, topk, mem_len, device):
     """
     Continue/accompany sequence, <seq> sampling from <model>
 
@@ -146,6 +145,8 @@ def accompany_sequence(model, seq, gen_len, temp, topk, mem_len, device):
         Trained transformer model
     seq: list
         Tokenised sequence to accompany
+    silence_tokens: list
+        List of silence tokens
     gen_len: int
         How many tokens to generate
     temp: float
@@ -165,31 +166,35 @@ def accompany_sequence(model, seq, gen_len, temp, topk, mem_len, device):
 
     """
     assert gen_len <= len(seq), "Cannot accompany beyond length of input sequence"
-    sampler = TxlSimpleSampler(model, device, mem_len=memlen)
+    sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
 
     inp = 0
     nll = 0.
     rhythm = []
     for i in range(gen_len):
-        _, probs = sampler.sample_next_token_updating_mem(inp, exclude_eos=False)
-        _probs = probs.cpu().numpy()
-        
-        _probmask = np.zeros_like(_probs)
-        _probmask[seq] = 1.
-        _probs *= _probmask
-        
-        if topk is not None:
-            ind = np.argpartition(_probs, -topk)[-topk:]
+        if seq[i] in silence_tokens:
+            sampler.sample_next_token_updating_mem(inp, exclude_eos=False)
+        else:
+            _, probs = sampler.sample_next_token_updating_mem(inp, exclude_eos=False)
+            _probs = probs.cpu().numpy()
+            
             _probmask = np.zeros_like(_probs)
             _probmask[seq] = 1.
             _probs *= _probmask
-        
-        _probs /= np.sum(_probs)
-        tar = np.random.choice(corpus.vocab_size, p=_probs)
-        assert tar in seq
-        rhythm.append(tar)
+            
+            if topk is not None:
+                ind = np.argpartition(_probs, -topk)[-topk:]
+                _probmask = np.zeros_like(_probs)
+                _probmask[seq] = 1.
+                _probs *= _probmask
+            
+            _probs /= np.sum(_probs)
+            tar = np.random.choice(corpus.vocab_size, p=_probs)
+            assert tar in seq
+            rhythm.append(tar)
 
-        inp = tar
+            inp = tar
+
     return rhythm
 
 
@@ -228,7 +233,7 @@ def continue_sequence(model, seq, prime_len, gen_len, temp, topk, mem_len, devic
 
     sampler = TxlSimpleSampler(model, device, mem_len=mem_len)
 
-    sampler = prime_sampler(sampler, seq, prime_len)
+    inp, sampler = prime_sampler(sampler, seq, prime_len)
 
     nll = 0.
     cont = seq[:]
@@ -257,10 +262,10 @@ def prime_sampler(sampler, seq, prime_len):
         nll += -np.log(p)
         inp = tar
 
-    return sampler
+    return inp, sampler
 
 
-def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):
+def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, velocity_vocab, time_vocab, qpm, time_sig=(4,4), ticks_per_quarter=480):
     """
     Convert sequence of tokens to note_sequence
 
@@ -273,8 +278,8 @@ def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, t
     pitch_classes: list of lists
         list of lists indicating grouping of similar percussion instruments
         A random candidate will be taken from each group
-    n_vel_buckets: int
-        Number of velocity buckets
+    velocity_vocab: int
+        mapping of velocity token: velocity bucket
     time_vocab: dict
         token:number of silence ticks
     qpm: int
@@ -295,22 +300,30 @@ def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, n_vel_buckets, t
     ticks_per_second = ticks_per_quarter*qpm/60
 
     these_pitches = [np.random.choice(p) for p in pitch_classes]
+    
+    n_vel_buckets = len(velocity_vocab)
 
     seq = music_pb2.NoteSequence()
     silence_ticks = 0
-    for t in tokens:
+    for i,t in enumerate(tokens):
         # Aggregate periods of silent ticks
         if t in time_tokens:
             silence_ticks += reverse_time_vocab[t]
+        elif t in velocity_vocab:
+            # Velocities are handled with pitches
+            continue
         else:
-            p, vel_bucket = pitch_vocab[t]
+            # Token: instrument
+            p = pitch_vocab[t]
             pitch = these_pitches[p]
-
+            # velocity always follows pitch
+            vel_bucket = velocity_vocab[tokens[i+1]]
             vel = generate_velocity_in_bucket(vel_bucket, n_vel_buckets)
-
+            
             start_time = silence_ticks/ticks_per_second
+            if start_time==0:
+                start_time=0.0000001
             end_time = start_time + 0.1 # TODO make this relative to qpm
-
             seq.notes.add(
                     pitch=pitch,
                     velocity=vel,
@@ -331,7 +344,7 @@ def generate_velocity_in_bucket(bucket, n_buckets):
     Generate a random velocity in <bucket> for range of <n_buckets>
         (0 -> 127 possible)
     """
-    srange = split_range(0, 127, n_buckets)
+    srange = split_range(1, 127, n_buckets)
 
     low = srange[bucket]
     high = srange[bucket+1]

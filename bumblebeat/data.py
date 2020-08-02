@@ -17,6 +17,7 @@ import torch
 import bumblebeat.utils.data as utils
 import bumblebeat.vocabulary
 
+
 def data_main(conf, pitch_classes, time_steps_vocab):
     """
     Run data pipeline
@@ -55,6 +56,7 @@ def data_main(conf, pitch_classes, time_steps_vocab):
     for batch in corpus.get_iterator('train', bsz=train_batch_size, bptt=100):
         print(batch)
         break
+
 
 def get_corpus(dataset_name, data_dir, pitch_classes, time_steps_vocab, processing_conf):
     """
@@ -158,108 +160,6 @@ class LMOrderedIterator(object):
         return self.get_fixlen_iter()
 
 
-
-
-class LMShuffledIterator(object):
-    def __init__(self, data, bsz, bptt, device='cpu', ext_len=None, shuffle=False):
-        """
-            data -- list[LongTensor] -- there is no order among the LongTensors
-        """
-        self.data = data
-
-        self.bsz = bsz
-        self.bptt = bptt
-        self.ext_len = ext_len if ext_len is not None else 0
-
-        self.device = device
-        self.shuffle = shuffle
-
-    def get_sent_stream(self):
-        # index iterator
-        epoch_indices = np.random.permutation(len(self.data)) if self.shuffle \
-            else np.array(range(len(self.data)))
-
-        # sentence iterator
-        for idx in epoch_indices:
-            yield self.data[idx]
-
-    def stream_iterator(self, sent_stream):
-        # streams for each data in the batch
-        streams = [None] * self.bsz
-
-        data = torch.LongTensor(self.bptt, self.bsz)
-        target = torch.LongTensor(self.bptt, self.bsz)
-
-        n_retain = 0
-
-        while True:
-            # data   : [n_retain+bptt x bsz]
-            # target : [bptt x bsz]
-            data[n_retain:].fill_(-1)
-            target.fill_(-1)
-
-            valid_batch = True
-
-            for i in range(self.bsz):
-                n_filled = 0
-                try:
-                    while n_filled < self.bptt:
-                        if streams[i] is None or len(streams[i]) <= 1:
-                            streams[i] = next(sent_stream)
-                        # number of new tokens to fill in
-                        n_new = min(len(streams[i]) - 1, self.bptt - n_filled)
-                        # first n_retain tokens are retained from last batch
-                        data[n_retain+n_filled:n_retain+n_filled+n_new, i] = \
-                            streams[i][:n_new]
-                        target[n_filled:n_filled+n_new, i] = \
-                            streams[i][1:n_new+1]
-                        streams[i] = streams[i][n_new:]
-                        n_filled += n_new
-                except StopIteration:
-                    valid_batch = False
-                    break
-
-            if not valid_batch:
-                return
-
-            data = data.to(self.device)
-            target = target.to(self.device)
-
-            yield data, target, self.bptt
-
-            n_retain = min(data.size(0), self.ext_len)
-            if n_retain > 0:
-                data[:n_retain] = data[-n_retain:]
-            data.resize_(n_retain + self.bptt, data.size(1))
-
-    def __iter__(self):
-        # sent_stream is an iterator
-        sent_stream = self.get_sent_stream()
-        for batch in self.stream_iterator(sent_stream):
-            yield batch
-
-
-class PartitionIterator(LMShuffledIterator):
-    def __init__(self, raw_data, bsz, bptt, device='cpu', ext_len=None, shuffle=False):
-
-        self.raw_data = iter(raw_data)
-
-        self.bsz = bsz
-        self.bptt = bptt
-        self.ext_len = ext_len if ext_len is not None else 0
-
-        self.device = device
-        self.shuffle = shuffle
-
-    def __iter__(self):
-        #if self.shuffle:
-        #    np.random.shuffle(self.paths)
-        # sents is list of tensors
-        #if self.shuffle:
-        #    np.random.shuffle(sents)
-        for batch in self.stream_iterator(iter(self.raw_data)):
-            yield batch
-
 class Corpus:
     """
     Corpus to handle data in pipeline
@@ -271,7 +171,7 @@ class Corpus:
             pitch_classes,
             time_steps_vocab,
             processing_conf,
-            n_velocity_buckets=4,
+            n_velocity_buckets=10,
             min_velocity=0,
             max_velocity=127,
             augment_stretch=True,
@@ -295,12 +195,13 @@ class Corpus:
         self.n_instruments = len(set(self.pitch_class_map.values()))
 
         print(f'Generating vocab of {self.n_instruments} instruments and {n_velocity_buckets} velocity buckets')
+        self.vel_vocab = {i:i+len(time_steps_vocab) for i in range(n_velocity_buckets)}
         self.vocab, self.reverse_vocab = bumblebeat.vocabulary.create_vocab(
-                        self.n_instruments, n_velocity_buckets, 
-                        first_index=len(time_steps_vocab)+1
-                    ) # leave initial indices for time steps vocab
-
-        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + 1 # add 1 for <eos> token
+                        self.n_instruments, 
+                        first_index=len(time_steps_vocab)+len(self.vel_vocab)+1
+                    ) # leave initial indices for time steps/velocity vocab
+        
+        self.vocab_size = len(self.reverse_vocab) + len(time_steps_vocab) + len(self.vel_vocab) + 1 # add 1 for <eos> token
 
         train_dataset = self.download_midi(dataset_name, tfds.Split.TRAIN)
         test_dataset = self.download_midi(dataset_name, tfds.Split.TEST)
@@ -422,7 +323,7 @@ class Corpus:
         """
         d = [(self.pitch_class_map[n.pitch], \
               bumblebeat.utils.data.get_bucket_number(n.velocity, self.velocity_buckets), \
-              n.quantized_start_step if quantize else s.start_time) \
+              n.quantized_start_step if quantize else n.start_time) \
                 for n in note_sequence.notes \
                 if n.pitch in self.pitch_class_map]
     
@@ -430,14 +331,14 @@ class Corpus:
         qpm = note_sequence.tempos[0].qpm # quarters per minute
         ticks_per_second = qpm*ticks_per_quarter/60
 
-        filled = self._tokenize_w_ticks(d, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, self.vocab, self.time_steps_vocab)
+        filled = self._tokenize_w_ticks(d, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, self.vocab, self.vel_vocab, self.time_steps_vocab)
 
         return filled
 
-    def _tokenize_w_ticks(self, triples, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, pitch_vocab, time_steps_vocab):
+    def _tokenize_w_ticks(self, triples, ticks_per_second, ticks_per_quarter, steps_per_quarter, quantize, pitch_vocab, vel_vocab, time_steps_vocab):
         """
         From list of <triples> in the form:
-            [(pitch class, bucketed velocity, start time (seconds)),...]
+            [(pitch class, bucketed velocity, start time (seconds/timesteps)),...]
         Return list of tokens matching pitch-velocity combination to tokens in <pitch_vocab>
         and filling silence with time tokens in <time_steps_vocab>
 
@@ -452,6 +353,7 @@ class Corpus:
         # so that we can ensure they are appended to our
         # final tokenised sequence in numerical order
         consecutive_pitches = 0
+
 
         # index, (pitch, velocity, start time)
         for i, (x, y, z) in enumerate(triples):
@@ -481,7 +383,7 @@ class Corpus:
                 time_tokens = self._convert_num_to_denominations(ticks, time_steps_vocab)
 
                 # Add time tokens to final sequence before we add our pitch class
-                w_silence += time_tokens
+                w_silence += [time_tokens]
             else:
                 # Remember that every iteration is a pitch.
                 # If <ticks> is 0 then this pitch occurs
@@ -493,10 +395,11 @@ class Corpus:
             # Triple to tokens...
             #   Discard time since we have handled that with time tokens.
             #   Look up pitch velocity combination for corresponding token.
-            pitch_tok = pitch_vocab[x][y] # [pitch class][velocity]
-            w_silence.append(pitch_tok)
+            pitch_tok = pitch_vocab[x] # [pitch class]
+            vel_tok = vel_vocab[y]
+            w_silence.append([pitch_tok, vel_tok])
 
-        return w_silence
+        return [x for y in w_silence for x in y]
 
     def _convert_num_to_denominations(self, num, time_vocab):
         """
@@ -507,7 +410,7 @@ class Corpus:
         ======
         num: int
             Number of ticks to convert
-        time_vocab: d¡ict
+        time_vocab: d¡ct
             {num_ticks: token}
 
         Return
