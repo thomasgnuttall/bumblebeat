@@ -1,13 +1,14 @@
 
 
 
+
 # Bumblebeat
 
-Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation. This code is an adaptation of the tensorflow implementation of the [Transformer-XL network](https://github.com/kimiyoung/transformer-xl) [2].
+Transformer NN architecture experimentation on the Magenta Groove Midi dataset for automated drum pattern generation. This code is an adaptation of the PyTorch implementation of the [Transformer-XL network](https://github.com/kimiyoung/transformer-xl) [2].
 
 ## 1. Dataset
 
-This project relies on the [Groove Midi Dataset](https://magenta.tensorflow.org/datasets/groove#dataset), the code handles downloading and processing but for more information visit the embedded link.
+This project relies on the [Groove Midi Dataset](https://magenta.tensorflow.org/datasets/groove#dataset), the code handles downloading and processing. For more information visit the embedded link.
 
 ## 2. Installation
 
@@ -17,10 +18,10 @@ To install Bumblebeat and all dependencies...
 
 Ensure that your pip version and python version are in sync.
 
-### 3.1 Getting Started on AWS
-The script `scripts/aws_init.sh` contains all you need to setup the development environment on AWS with the *Deep Learning Base AMI (Amazon Linux 2) Version 24.0*. It is recommended to run the script in stages rather than as one.
+### 2.1 Getting Started on AWS
+The script `scripts/aws_init.sh` contains all you need to setup the development environment on AWS with the *Deep Learning Base AMI (Amazon Linux 2) Version 31.0*. Since some of the installs in the script prompt the user for Y/N, it is recommended to run the script in stages rather than as one.
 
-It is important to note that if you intend to rely on GPUs you must make sure the correct requirement is uncommented in `requirements.txt` (more details there).
+Some useful one liners for interacting with the instance - such as ssh, file transfer, directory sync - can be found in `scripts/instance.sh`. 
 
 ## 3. Usage
 
@@ -53,23 +54,24 @@ And batched train data will be printed to screens. (Alter paths as necessary)
 To train...
 
 ```
-python bumblebeat model-pipeline --conf-path 'conf/train_conf.yaml'
+python bumblebeat model-pipeline \
+    --conf-path 'conf/train_conf.yaml' \
+    --pitches-path 'conf/drum_pitches.yaml' \
+    --time-steps-path 'conf/time_steps_vocab.yaml'
 ```
 
 To evaluate...
 
 ```
-python bumblebeat model-pipeline --conf-path 'conf/test_conf.yaml'
+python bumblebeat model-pipeline \
+    --conf-path 'conf/train_conf.yaml' \
+    --pitches-path 'conf/drum_pitches.yaml' \
+    --time-steps-path 'conf/time_steps_vocab.yaml'
 ```
-(note that the difference in the last two steps is whether or not `do_train` or `do_eval` are True or False)
 
-To generate...
+(note that the difference in the last two steps should be whether or not `do_train` or `do_eval` are True or False in the primary conf)
 
-`bash here`
-
-To evaluate...
-
-`bash here`
+To generate from a trained model see `bumblebeat/output/generate.py`. Specifically, `generate_sequences()`, `continue_sequence()` and `accompany_sequence()`.  CLI functionality coming soon...
 
 
 ## 4. References
