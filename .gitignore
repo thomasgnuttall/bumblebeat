@@ -92,5 +92,10 @@ log.txt
 *.tsv
 *.png
 *.midi
+*.mid
 *.wav
 *.mp3s
+
+# Hacky
+*.donotpush
+*.txt.swp
