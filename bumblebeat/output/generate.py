@@ -64,10 +64,10 @@ from bumblebeat.utils.generation import TxlSimpleSampler
             s[1:], 
             pitch_vocab, 
             simplified_pitches, 
-            10, 
+            corpus.vel_vocab, 
             time_vocab, 
             143.99988480009216)
-        note_sequence_to_midi_file(note_sequence, f'sound_examples/experiments/old_model_{i}.midi')
+        note_sequence_to_midi_file(note_sequence, f'sound_examples/experiments/seperate_velocities_{i}.midi')
 
 """
 
