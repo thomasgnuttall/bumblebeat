@@ -81,3 +81,5 @@ To generate from a trained model see `bumblebeat/output/generate.py`. Specifical
   International Conference on Machine Learning (ICML), 2019.
 
 [2] Zihang Dai, Zhilin Yang, Yiming Yang, Jaime Carbonell, Quoc V. Le, Ruslan Salakhutdinov - Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context
+
+[3] Chris Donahue, Huanru Henry Mao, Yiting Ethan Li, Garrison W. Cottrell, Julian McAuley - LakhNES: Improving multi-instrumental music generation with cross-domain pre-training
