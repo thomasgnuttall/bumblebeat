@@ -19,7 +19,7 @@
     
     corpus = get_corpus(
         data_conf['dataset'],
-        data_conf['data_dir']+'new_style/',
+        data_conf['data_dir'],
         pitch_classes['DEFAULT_DRUM_TYPE_PITCHES'],
         time_vocab,
         conf['processing']
@@ -40,7 +40,7 @@
 
     random_sequence = random.choice([x for x in corpus.train_data if x['style']['primary']==7])
     
-    for i in [4]:
+    for i in [4, 8, 16]:
         if i:
             # To midi note sequence using magent
             dev_sequence = corpus._quantize(mm.midi_to_note_sequence(random_sequence["midi"]), i)

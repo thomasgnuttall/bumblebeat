@@ -29,6 +29,7 @@ source activate pytorch_latest_p36
 sudo yum install gcc-c++ git alsa-lib-devel
 sudo cp /etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt
 
+
 #########
 # Package
 #########
