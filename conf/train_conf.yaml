@@ -6,7 +6,7 @@ seed:
 
 
 data:
-    data_dir: 'data/'
+    data_dir: 'data/separate_velocity'
     dataset: 'groove/full-midionly' # Datset name (to be downloaded from tensorflow dataset)
     tgt_len: *tgt_len
     per_host_train_bsz: *batch_size
@@ -28,9 +28,9 @@ model:
 
 
     ## Experiment (data/checkpoint/directory) ##
-    data_dir: "data/groove/full-midionly/tfrecords" # Where to find tfrecords of training data
-    record_info_dir: "data/groove/full-midionly/tfrecords/" # Where to find record info corpus
-    corpus_info_path: "data/groove/full-midionly/corpus-info.json" # Where to find corpus info json
+    data_dir: "data/separate_velocity/groove/full-midionly/tfrecords" # Where to find tfrecords of training data
+    record_info_dir: "data/separate_velocity/groove/full-midionly/tfrecords/" # Where to find record info corpus
+    corpus_info_path: "data/separate_velocity/groove/full-midionly/corpus-info.json" # Where to find corpus info json
     model_dir: 'EXP-groove/full-midionly' # Where to store trained model
     do_train: True # Whether to run training
     do_eval: False # Whether to run eval on the dev set
@@ -39,7 +39,7 @@ model:
     
     ## Optimization ##
     optim: 'adam' # Which optimizer to use
-    learning_rate: 0.000025 # Maximum learning rate
+    learning_rate: 0.00001 # Maximum learning rate
     warmup_steps: 0 # Number of steps for linear lr warmup (upper epoch lmit)
     clip: 0.25 # Gradient clipping value
     clip_nonemb: True # Only clip the gradient of non-embedding params?
