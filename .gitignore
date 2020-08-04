@@ -98,4 +98,4 @@ log.txt
 
 # Hacky
 *.donotpush
-*.txt.swp
+*.log.txt.swp
