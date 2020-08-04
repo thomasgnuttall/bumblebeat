@@ -195,7 +195,7 @@ class Corpus:
         self.n_instruments = len(set(self.pitch_class_map.values()))
 
         print(f'Generating vocab of {self.n_instruments} instruments and {n_velocity_buckets} velocity buckets')
-        self.vel_vocab = {i:i+len(time_steps_vocab) for i in range(n_velocity_buckets)}
+        self.vel_vocab = {i:i+len(time_steps_vocab)+1 for i in range(n_velocity_buckets)}
         self.vocab, self.reverse_vocab = bumblebeat.vocabulary.create_vocab(
                         self.n_instruments, 
                         first_index=len(time_steps_vocab)+len(self.vel_vocab)+1
