@@ -53,12 +53,12 @@ from bumblebeat.utils.generation import TxlSimpleSampler
     model = load_model(path, device)
     seqs = generate_sequences(
                     model,
-                    num=5, 
+                    num=1, 
                     gen_len=gen_len, 
                     mem_len=mem_len, 
                     device=device, 
                     temp=0.95, 
-                    topk=32)
+                    topk=5)
     for i,s in enumerate(seqs):
         note_sequence = tokens_to_note_sequence(
             s[1:], 
@@ -67,7 +67,7 @@ from bumblebeat.utils.generation import TxlSimpleSampler
             corpus.vel_vocab, 
             time_vocab, 
             143.99988480009216)
-        note_sequence_to_midi_file(note_sequence, f'sound_examples/experiments/seperate_velocities_{i}.midi')
+        note_sequence_to_midi_file(note_sequence, f'sound_examples/experiments/seperate_velocities_l_{i}.midi')
 
 """
 
@@ -317,6 +317,8 @@ def tokens_to_note_sequence(tokens, pitch_vocab, pitch_classes, velocity_vocab, 
             p = pitch_vocab[t]
             pitch = these_pitches[p]
             # velocity always follows pitch
+            if i == len(tokens)-1:
+                break
             vel_bucket = velocity_vocab[tokens[i+1]]
             vel = generate_velocity_in_bucket(vel_bucket, n_vel_buckets)
             

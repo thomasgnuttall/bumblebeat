@@ -32,7 +32,7 @@
 
     USE_CUDA = False
     mem_len = 1000
-    gen_len = 1000
+    gen_len = 500
     same_len = True
     
     simplified_pitches = [[36], [38], [42], [46], [45], [48], [50], [49], [51]]
