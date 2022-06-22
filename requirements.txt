@@ -1,5 +1,5 @@
 Click==7.0
-numpy==1.18.1
+numpy==1.22.0
 magenta==1.2.2
 # Which tensorflow to use depends on whether or not
 # you have access to a GPU
